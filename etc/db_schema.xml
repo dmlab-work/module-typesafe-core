@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
+ */
+-->
+<schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Setup/Declaration/Schema/etc/schema.xsd">
+    <table name="dmlab_typesafe_response_cache" resource="default" engine="innodb"
+           comment="DmLab TypeSafe Response Cache">
+        <column xsi:type="char" name="cache_key" length="64" nullable="false" comment="SHA-256 Request Key"/>
+        <column xsi:type="varchar" name="consumer" length="64" nullable="false" comment="Consumer Code"/>
+        <column xsi:type="varchar" name="model" length="64" nullable="false" comment="Model Id"/>
+        <column xsi:type="mediumtext" name="response" nullable="false" comment="Raw Response Body"/>
+        <column xsi:type="int" name="input_tokens" unsigned="true" nullable="false" default="0"
+                comment="Input Tokens"/>
+        <column xsi:type="datetime" name="created_at" nullable="false" comment="Created At (UTC)"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="cache_key"/>
+        </constraint>
+        <index referenceId="DMLAB_TYPESAFE_RESPONSE_CACHE_CREATED_AT" indexType="btree">
+            <column name="created_at"/>
+        </index>
+    </table>
+    <table name="dmlab_typesafe_usage" resource="default" engine="innodb" comment="DmLab TypeSafe Usage">
+        <column xsi:type="bigint" name="usage_id" unsigned="true" nullable="false" identity="true"
+                comment="Usage Id"/>
+        <column xsi:type="char" name="period" length="7" nullable="false" comment="Month (Y-m, UTC)"/>
+        <column xsi:type="varchar" name="consumer" length="64" nullable="false" comment="Consumer Code"/>
+        <column xsi:type="int" name="requests" unsigned="true" nullable="false" default="0"
+                comment="Live Requests"/>
+        <column xsi:type="int" name="cache_hits" unsigned="true" nullable="false" default="0"
+                comment="Cache Hits"/>
+        <column xsi:type="bigint" name="input_tokens" unsigned="true" nullable="false" default="0"
+                comment="Input Tokens"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false"
+                default="CURRENT_TIMESTAMP" comment="Updated At"/>
+        <constraint xsi:type="primary" referenceId="PRIMARY">
+            <column name="usage_id"/>
+        </constraint>
+        <constraint xsi:type="unique" referenceId="DMLAB_TYPESAFE_USAGE_PERIOD_CONSUMER">
+            <column name="period"/>
+            <column name="consumer"/>
+        </constraint>
+    </table>
+</schema>

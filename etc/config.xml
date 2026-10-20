@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <dmlab_typesafe>
+            <general>
+                <enabled>0</enabled>
+                <api_key backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
+                <model>jev-1.13.0</model>
+                <base_url>https://api.typesafe.ai</base_url>
+            </general>
+            <limits>
+                <timeout>20</timeout>
+                <concurrency>4</concurrency>
+                <max_attempts>4</max_attempts>
+                <monthly_token_budget>0</monthly_token_budget>
+                <cache_ttl_days>30</cache_ttl_days>
+            </limits>
+        </dmlab_typesafe>
+    </default>
+</config>

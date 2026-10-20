@@ -1,0 +1,69 @@
+<?php
+/**
+ * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
+ */
+declare(strict_types=1);
+
+namespace DmLab\TypeSafeCore\Console\Command;
+
+use DmLab\TypeSafeCore\Exception\TypeSafeException;
+use DmLab\TypeSafeCore\Model\Config;
+use DmLab\TypeSafeCore\Model\Connection\ModelLister;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+
+/**
+ * `dmlab:typesafe:ping` — shows the saved settings and lists the models the API key can use.
+ */
+class PingCommand extends Command
+{
+    public const NAME = 'dmlab:typesafe:ping';
+
+    /**
+     * @param Config $config
+     * @param ModelLister $modelLister
+     */
+    public function __construct(
+        private readonly Config $config,
+        private readonly ModelLister $modelLister
+    ) {
+        parent::__construct();
+    }
+
+    /**
+     * @inheritDoc
+     */
+    protected function configure(): void
+    {
+        $this->setName(self::NAME)
+            ->setDescription('Checks the TypeSafe connection and lists the available models.');
+        parent::configure();
+    }
+
+    /**
+     * @inheritDoc
+     */
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $output->writeln('Base URL: ' . $this->config->getBaseUrl());
+        $model = $this->config->getModel();
+        $output->writeln('Configured model: ' . $model);
+        $output->writeln('Enabled: ' . ($this->config->isEnabled() ? 'Yes' : 'No'));
+
+        try {
+            $models = $this->modelLister->listModels();
+        } catch (TypeSafeException $e) {
+            $output->writeln('<error>' . $e->getMessage() . '</error>');
+            return Command::FAILURE;
+        }
+
+        $output->writeln('OK — models: ' . implode(', ', $models));
+        if (!in_array($model, $models, true)) {
+            $output->writeln('The list shows aliases only; pinned versions such as jev-1.13.0 are accepted too.');
+        }
+
+        return Command::SUCCESS;
+    }
+}

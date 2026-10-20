@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <preference for="DmLab\TypeSafeCore\Api\ConfigInterface" type="DmLab\TypeSafeCore\Model\Config"/>
+    <preference for="DmLab\TypeSafeCore\Api\UsageInterface" type="DmLab\TypeSafeCore\Model\Usage\UsageLedger"/>
+    <preference for="DmLab\TypeSafeCore\Api\ClientInterface" type="DmLab\TypeSafeCore\Model\Client"/>
+    <preference for="DmLab\TypeSafeCore\Model\Http\TransportInterface"
+                type="DmLab\TypeSafeCore\Model\Http\CurlMultiTransport"/>
+    <!-- Keep the API key out of app/etc/config.php on app:config:dump. -->
+    <type name="Magento\Config\Model\Config\TypePool">
+        <arguments>
+            <argument name="sensitive" xsi:type="array">
+                <item name="dmlab_typesafe/general/api_key" xsi:type="string">1</item>
+            </argument>
+        </arguments>
+    </type>
+    <type name="Magento\Framework\Console\CommandListInterface">
+        <arguments>
+            <argument name="commands" xsi:type="array">
+                <item name="dmlab_typesafe_ping" xsi:type="object">DmLab\TypeSafeCore\Console\Command\PingCommand</item>
+                <item name="dmlab_typesafe_usage" xsi:type="object">DmLab\TypeSafeCore\Console\Command\UsageCommand</item>
+            </argument>
+        </arguments>
+    </type>
+    <!-- Proxies keep bin/magento bootstrap free of config/DB access. -->
+    <type name="DmLab\TypeSafeCore\Console\Command\PingCommand">
+        <arguments>
+            <argument name="config" xsi:type="object">DmLab\TypeSafeCore\Model\Config\Proxy</argument>
+            <argument name="modelLister" xsi:type="object">DmLab\TypeSafeCore\Model\Connection\ModelLister\Proxy</argument>
+        </arguments>
+    </type>
+    <type name="DmLab\TypeSafeCore\Console\Command\UsageCommand">
+        <arguments>
+            <argument name="usageLedger" xsi:type="object">DmLab\TypeSafeCore\Model\Usage\UsageLedger\Proxy</argument>
+            <argument name="config" xsi:type="object">DmLab\TypeSafeCore\Model\Config\Proxy</argument>
+        </arguments>
+    </type>
+</config>

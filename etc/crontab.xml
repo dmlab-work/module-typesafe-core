@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
+    <group id="default">
+        <job name="dmlab_typesafe_purge_response_cache"
+             instance="DmLab\TypeSafeCore\Cron\PurgeResponseCache"
+             method="execute">
+            <schedule>17 3 * * *</schedule>
+        </job>
+    </group>
+</config>

@@ -1,0 +1,38 @@
+{
+    "name": "dmlab/module-typesafe-core",
+    "description": "TypeSafe (Jev) AI client for Magento 2: shared connection with your own encrypted API key, response cache, monthly token budget, retries and rate limiting.",
+    "keywords": [
+        "magento2",
+        "magento2-module",
+        "magento 2",
+        "ai",
+        "llm",
+        "classification",
+        "api client",
+        "typesafe",
+        "jev"
+    ],
+    "type": "magento2-module",
+    "license": "OSL-3.0",
+    "version": "0.0.1",
+    "require": {
+        "php": "~8.3.0||~8.4.0||~8.5.0",
+        "ext-curl": "*",
+        "magento/framework": "^103.0.9",
+        "magento/module-backend": "^102.0.9",
+        "magento/module-config": "^101.2.9",
+        "symfony/console": "^6.4||^7.0",
+        "psr/log": "^2.0||^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "files": [
+            "registration.php"
+        ],
+        "psr-4": {
+            "DmLab\\TypeSafeCore\\": ""
+        }
+    }
+}
