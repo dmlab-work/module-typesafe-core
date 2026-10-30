@@ -23,8 +23,16 @@ class PackagingTest extends TestCase
 
         self::assertSame('dmlab/module-typesafe-core', $composer['name']);
         self::assertSame('magento2-module', $composer['type']);
-        self::assertSame('0.0.1', $composer['version']);
+        self::assertSame('0.0.2', $composer['version']);
         self::assertSame('OSL-3.0', $composer['license']);
+        self::assertSame('https://github.com/dmlab-work/module-typesafe-core', $composer['homepage']);
+        self::assertSame(
+            [
+                'issues' => 'https://github.com/dmlab-work/module-typesafe-core/issues',
+                'source' => 'https://github.com/dmlab-work/module-typesafe-core',
+            ],
+            $composer['support']
+        );
     }
 
     public function testRequireSetIsExact(): void
@@ -33,17 +41,17 @@ class PackagingTest extends TestCase
 
         self::assertSame(
             [
-                'php' => '~8.3.0||~8.4.0||~8.5.0',
+                'php' => '~8.2.0||~8.3.0||~8.4.0||~8.5.0',
                 'ext-curl' => '*',
-                'magento/framework' => '^103.0.9',
-                'magento/module-backend' => '^102.0.9',
-                'magento/module-config' => '^101.2.9',
-                'symfony/console' => '^6.4||^7.0',
+                'magento/framework' => '^103.0.7',
+                'magento/module-backend' => '^102.0.7',
+                'magento/module-config' => '^101.2.7',
+                'symfony/console' => '^6.4||^7.4',
                 'psr/log' => '^2.0||^3.0',
             ],
             $composer['require']
         );
-        self::assertSame(['phpunit/phpunit' => '^12.0'], $composer['require-dev']);
+        self::assertSame(['phpunit/phpunit' => '^11.5||^12.5'], $composer['require-dev']);
         self::assertStringNotContainsString('>=', $this->read('composer.json'));
     }
 
@@ -134,11 +142,52 @@ class PackagingTest extends TestCase
 
     public function testChangelogAndGitattributes(): void
     {
-        self::assertStringContainsString("\n## 0.0.1\n", $this->read('CHANGELOG.md'));
+        $changelog = $this->read('CHANGELOG.md');
+        self::assertStringStartsWith("# Changelog\n\n## {$this->composer()['version']}\n", $changelog);
+        self::assertStringContainsString("\n## 0.0.1\n", $changelog);
 
         $attributes = $this->read('.gitattributes');
         self::assertStringContainsString('/Test export-ignore', $attributes);
         self::assertStringContainsString('/.github export-ignore', $attributes);
+    }
+
+    public function testCiTestsEverySupportedPhpWithoutCountingDownloads(): void
+    {
+        $ci = $this->read('.github/workflows/ci.yml');
+
+        self::assertStringContainsString("php: ['8.2', '8.3', '8.4', '8.5']", $ci);
+        $notify = strpos($ci, '- run: composer config notify-on-install false');
+        $configure = strpos($ci, '- name: Configure Magento packages');
+        $install = strpos($ci, '- uses: ramsey/composer-install@');
+        self::assertNotFalse($notify);
+        self::assertNotFalse($configure);
+        self::assertNotFalse($install);
+        self::assertGreaterThan($configure, $notify);
+        self::assertLessThan($install, $notify);
+    }
+
+    public function testReadmeStatesRequirementsAndShowsScreenshot(): void
+    {
+        $readme = $this->read('README.md');
+
+        self::assertStringContainsString("## Requirements\nMagento 2.4.7+ · PHP 8.2–8.5", $readme);
+        self::assertStringContainsString('](.github/images/config.png)', $readme);
+        self::assertFileExists($this->path('.github/images/config.png'));
+    }
+
+    public function testPhpunitConfigMatchesInstalledSchema(): void
+    {
+        $schema = dirname((new \ReflectionClass(TestCase::class))->getFileName(), 3) . '/phpunit.xsd';
+        $document = new \DOMDocument();
+        self::assertTrue($document->load($this->path('Test/Unit/phpunit.xml')));
+
+        $previous = libxml_use_internal_errors(true);
+        $valid = $document->schemaValidate($schema);
+        $errors = array_map(static fn (\LibXMLError $error): string => trim($error->message), libxml_get_errors());
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        self::assertTrue($valid, implode("\n", $errors));
     }
 
     /**
