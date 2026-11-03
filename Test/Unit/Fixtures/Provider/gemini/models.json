@@ -1,0 +1,9 @@
+{
+    "models": [
+        {"name": "models/gemini-3.5-flash-lite", "displayName": "Gemini 3.5 Flash-Lite", "supportedGenerationMethods": ["generateContent", "countTokens"]},
+        {"name": "models/gemini-3.5-flash", "displayName": "Gemini 3.5 Flash", "supportedGenerationMethods": ["generateContent", "countTokens"]},
+        {"name": "", "displayName": "Unnamed"},
+        {"displayName": "No name"},
+        {"name": "models/gemini-3.5-pro", "displayName": "Gemini 3.5 Pro", "supportedGenerationMethods": ["generateContent", "countTokens"]}
+    ]
+}

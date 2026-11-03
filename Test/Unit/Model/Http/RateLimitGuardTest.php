@@ -42,7 +42,7 @@ class RateLimitGuardTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects($this->once())
             ->method('warning')
-            ->with('TypeSafe rate limit reached; calls paused for 120 s.');
+            ->with('AI client rate limit reached; calls paused for 120 s.');
         $guard = $this->guard($logger);
 
         $guard->pause(120);

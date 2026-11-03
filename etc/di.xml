@@ -12,11 +12,30 @@
     <preference for="DmLab\TypeSafeCore\Api\ClientInterface" type="DmLab\TypeSafeCore\Model\Client"/>
     <preference for="DmLab\TypeSafeCore\Model\Http\TransportInterface"
                 type="DmLab\TypeSafeCore\Model\Http\CurlMultiTransport"/>
-    <!-- Keep the API key out of app/etc/config.php on app:config:dump. -->
+    <!-- CURLPROTO_HTTP | CURLPROTO_HTTPS: self-hosted OpenAI-compatible endpoints; BaseUrl backends keep the rest https. -->
+    <type name="DmLab\TypeSafeCore\Model\Http\CurlMultiTransport">
+        <arguments>
+            <argument name="allowedProtocols" xsi:type="number">3</argument>
+        </arguments>
+    </type>
+    <type name="DmLab\TypeSafeCore\Model\Provider\ProviderPool">
+        <arguments>
+            <argument name="providers" xsi:type="array">
+                <item name="typesafe" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\TypeSafe\TypeSafeProvider</item>
+                <item name="openai_compatible" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\OpenAiCompatible\OpenAiCompatibleProvider</item>
+                <item name="anthropic" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\Anthropic\AnthropicProvider</item>
+                <item name="gemini" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\Gemini\GeminiProvider</item>
+            </argument>
+        </arguments>
+    </type>
+    <!-- Keep API keys out of app/etc/config.php on app:config:dump. -->
     <type name="Magento\Config\Model\Config\TypePool">
         <arguments>
             <argument name="sensitive" xsi:type="array">
                 <item name="dmlab_typesafe/general/api_key" xsi:type="string">1</item>
+                <item name="dmlab_typesafe/openai_compatible/api_key" xsi:type="string">1</item>
+                <item name="dmlab_typesafe/anthropic/api_key" xsi:type="string">1</item>
+                <item name="dmlab_typesafe/gemini/api_key" xsi:type="string">1</item>
             </argument>
         </arguments>
     </type>
@@ -32,13 +51,15 @@
     <type name="DmLab\TypeSafeCore\Console\Command\PingCommand">
         <arguments>
             <argument name="config" xsi:type="object">DmLab\TypeSafeCore\Model\Config\Proxy</argument>
-            <argument name="modelLister" xsi:type="object">DmLab\TypeSafeCore\Model\Connection\ModelLister\Proxy</argument>
+            <argument name="providerPool" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\ProviderPool\Proxy</argument>
+            <argument name="providerSettings" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\ProviderSettings\Proxy</argument>
         </arguments>
     </type>
     <type name="DmLab\TypeSafeCore\Console\Command\UsageCommand">
         <arguments>
             <argument name="usageLedger" xsi:type="object">DmLab\TypeSafeCore\Model\Usage\UsageLedger\Proxy</argument>
             <argument name="config" xsi:type="object">DmLab\TypeSafeCore\Model\Config\Proxy</argument>
+            <argument name="providerPool" xsi:type="object">DmLab\TypeSafeCore\Model\Provider\ProviderPool\Proxy</argument>
         </arguments>
     </type>
 </config>

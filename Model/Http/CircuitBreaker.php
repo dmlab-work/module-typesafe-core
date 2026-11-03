@@ -41,7 +41,7 @@ class CircuitBreaker
         try {
             return $this->cache->load(self::OPEN_KEY) === '1';
         } catch (\Exception $e) {
-            $this->logger->warning('TypeSafe circuit breaker read failed: ' . $e->getMessage());
+            $this->logger->warning('AI client circuit breaker read failed: ' . $e->getMessage());
             return false;
         }
     }
@@ -73,12 +73,12 @@ class CircuitBreaker
             $this->cache->save('1', self::OPEN_KEY, [], self::OPEN_SECONDS);
             $this->cache->remove(self::FAILURES_KEY);
             $this->logger->warning(sprintf(
-                'TypeSafe circuit breaker opened for %d s after %d consecutive failures.',
+                'AI client circuit breaker opened for %d s after %d consecutive failures.',
                 self::OPEN_SECONDS,
                 $count
             ));
         } catch (\Exception $e) {
-            $this->logger->warning('TypeSafe circuit breaker write failed: ' . $e->getMessage());
+            $this->logger->warning('AI client circuit breaker write failed: ' . $e->getMessage());
         }
     }
 }

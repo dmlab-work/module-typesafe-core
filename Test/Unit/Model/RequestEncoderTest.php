@@ -14,22 +14,48 @@ use DmLab\TypeSafeCore\Api\Data\Question\QuestionInterface;
 use DmLab\TypeSafeCore\Api\Data\Question\ScoreQuestion;
 use DmLab\TypeSafeCore\Api\Data\Request;
 use DmLab\TypeSafeCore\Exception\RequestException;
+use DmLab\TypeSafeCore\Model\Http\Backoff;
 use DmLab\TypeSafeCore\Model\Json\CanonicalJson;
+use DmLab\TypeSafeCore\Model\Provider\ProviderSettings;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\ResponseParser;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\TypeSafeProvider;
 use DmLab\TypeSafeCore\Model\RequestEncoder;
+use DmLab\TypeSafeCore\Test\Unit\Fake\FakeProvider;
+use DmLab\TypeSafeCore\Test\Unit\Fake\FakeTransport;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use PHPUnit\Framework\TestCase;
 
 class RequestEncoderTest extends TestCase
 {
     private const MODEL = 'jev-1.13.0';
+    private const CANONICAL =
+        '{"model":"jev-1.13.0","questions":{"q":{"instructions":"Q?","type":"noul"}},"state":"s"}';
 
     /**
      * @var RequestEncoder
      */
     private RequestEncoder $encoder;
 
+    /**
+     * @var ProviderSettings
+     */
+    private ProviderSettings $settings;
+
+    /**
+     * @var TypeSafeProvider
+     */
+    private TypeSafeProvider $typeSafe;
+
     protected function setUp(): void
     {
         $this->encoder = $this->encoder('jev-config');
+        $this->settings = new ProviderSettings($this->createStub(ScopeConfigInterface::class));
+        $this->typeSafe = new TypeSafeProvider(
+            $this->settings,
+            new ResponseParser(),
+            new Backoff(),
+            new FakeTransport()
+        );
     }
 
     private function encoder(string $configModel): RequestEncoder
@@ -42,7 +68,12 @@ class RequestEncoderTest extends TestCase
 
     private function key(Request $request, string $model = self::MODEL): string
     {
-        return $this->encoder->cacheKey($request, $model);
+        return $this->encoder->cacheKey($request, $model, $this->typeSafe);
+    }
+
+    private function body(Request $request): string
+    {
+        return (string)$this->typeSafe->buildRequest($request, self::MODEL, null)->getBody();
     }
 
     private function request(
@@ -81,12 +112,12 @@ class RequestEncoderTest extends TestCase
     {
         $pairs = $this->request(['x' => [['a', 1]]]);
         $map = $this->request(['x' => (object)['a' => 1]]);
-        $this->assertNotSame($this->encoder->body($pairs, self::MODEL), $this->encoder->body($map, self::MODEL));
+        $this->assertNotSame($this->body($pairs), $this->body($map));
         $this->assertNotSame($this->key($pairs), $this->key($map));
 
         $list = $this->request(['x' => ['b', 'a']]);
         $unsorted = $this->request(['x' => [1 => 'a', 0 => 'b']]);
-        $this->assertNotSame($this->encoder->body($list, self::MODEL), $this->encoder->body($unsorted, self::MODEL));
+        $this->assertNotSame($this->body($list), $this->body($unsorted));
         $this->assertNotSame($this->key($list), $this->key($unsorted));
     }
 
@@ -152,8 +183,8 @@ class RequestEncoderTest extends TestCase
 
         $other = $this->encoder('jev-other');
         $this->assertNotSame(
-            $this->encoder->cacheKey($request, $this->encoder->resolveModel($request)),
-            $other->cacheKey($request, $other->resolveModel($request))
+            $this->key($request, $this->encoder->resolveModel($request)),
+            $other->cacheKey($request, $other->resolveModel($request), $this->typeSafe)
         );
     }
 
@@ -194,68 +225,53 @@ class RequestEncoderTest extends TestCase
         );
     }
 
-    public function testBodyShape(): void
+    public function testEmptyScopeKeyIsTheBareCanonicalHash(): void
     {
-        $body = $this->encoder->body($this->request(model: 'ignored'), self::MODEL);
+        $request = new Request('s', ['q' => new NoulQuestion('Q?')], 'c');
+
+        $this->assertSame(hash('sha256', self::CANONICAL), $this->key($request));
+    }
+
+    public function testScopeIsPrefixedToTheCanonicalJson(): void
+    {
+        $request = new Request('s', ['q' => new NoulQuestion('Q?')], 'c');
+        $scoped = $this->encoder->cacheKey($request, self::MODEL, new FakeProvider('anthropic', $this->settings));
+
         $this->assertSame(
-            '{"model":"jev-1.13.0","state":{"name":"Shirt","attrs":{"color":"red","size":"M"}},"questions":{'
-            . '"red":{"type":"noul","instructions":"Is it red?","criteria":{"true":"Red","false":"Not red"}},'
-            . '"size":{"type":"choice","instructions":"Size?","criteria":{"S":null,"M":"Medium"}},'
-            . '"quality":{"type":"score","instructions":"Quality?","criteria":["bad","ok","good"]}}}',
-            $body
+            hash(
+                'sha256',
+                'anthropic{"model":"jev-1.13.0","questions":{"\\u0000":[["q",{"instructions":"Q?","type":"noul"}]]},'
+                . '"state":"s"}'
+            ),
+            $scoped
+        );
+        $this->assertNotSame($this->key($request), $scoped);
+    }
+
+    public function testScopedKeyDependsOnQuestionOrder(): void
+    {
+        $a = new NoulQuestion('A?');
+        $b = new NoulQuestion('B?');
+        $provider = new FakeProvider('anthropic', $this->settings);
+
+        $this->assertNotSame(
+            $this->encoder->cacheKey(new Request('s', ['a' => $a, 'b' => $b], 'c'), self::MODEL, $provider),
+            $this->encoder->cacheKey(new Request('s', ['b' => $b, 'a' => $a], 'c'), self::MODEL, $provider)
         );
     }
 
-    public function testBodyKeepsOptionOrderAndSendsNumericIdsAsObjects(): void
+    public function testInvalidUtf8IsSubstitutedInTheKey(): void
     {
-        $body = $this->encoder->body($this->request('state', [
-            '0' => new ChoiceQuestion('N?', ['1' => null, '0' => 'zero']),
-        ]), self::MODEL);
         $this->assertSame(
-            '{"model":"jev-1.13.0","state":"state","questions":{"0":'
-            . '{"type":"choice","instructions":"N?","criteria":{"1":null,"0":"zero"}}}}',
-            $body
+            $this->key($this->request(['name' => "\u{FFFD}1"])),
+            $this->key($this->request(['name' => "\xB1\x31"]))
         );
     }
 
-    public function testBodyFlags(): void
-    {
-        $body = $this->encoder->body($this->request(['url' => 'a/b', 'name' => 'Café', 'w' => 1.0]), self::MODEL);
-        $this->assertStringContainsString('{"url":"a/b","name":"Café","w":1.0}', $body);
-    }
-
-    public function testInvalidUtf8IsSubstituted(): void
-    {
-        $request = $this->request(['name' => "\xB1\x31"]);
-        $this->assertStringContainsString("\"name\":\"\u{FFFD}1\"", $this->encoder->body($request, self::MODEL));
-        $this->assertSame(
-            $this->encoder->cacheKey($this->request(['name' => "\u{FFFD}1"]), self::MODEL),
-            $this->encoder->cacheKey($request, self::MODEL)
-        );
-    }
-
-    public function testNanIsARequestException(): void
-    {
-        $request = $this->request(['weight' => NAN]);
-        $this->assertEncodeFails(fn () => $this->encoder->body($request, self::MODEL));
-        $this->assertEncodeFails(fn () => $this->encoder->cacheKey($request, self::MODEL));
-    }
-
-    public function testBodyOverLimitIsARequestException(): void
-    {
-        $request = $this->request(str_repeat('a', RequestEncoder::MAX_BODY_BYTES));
-        try {
-            $this->encoder->body($request, self::MODEL);
-            $this->fail('Expected RequestException');
-        } catch (RequestException $e) {
-            $this->assertSame('TypeSafe request body exceeds 32 MiB.', $e->getMessage());
-        }
-    }
-
-    private function assertEncodeFails(callable $call): void
+    public function testNanIsARequestExceptionWithTheProviderLabel(): void
     {
         try {
-            $call();
+            $this->key($this->request(['weight' => NAN]));
             $this->fail('Expected RequestException');
         } catch (RequestException $e) {
             $this->assertStringStartsWith('TypeSafe request could not be encoded: ', $e->getMessage());

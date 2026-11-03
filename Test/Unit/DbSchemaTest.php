@@ -84,8 +84,20 @@ class DbSchemaTest extends TestCase
             $schema['dmlab_typesafe_response_cache']['index']
         );
         self::assertSame(
-            ['usage_id', 'period', 'consumer', 'requests', 'cache_hits', 'input_tokens', 'updated_at'],
+            ['usage_id', 'period', 'consumer', 'requests', 'cache_hits', 'input_tokens', 'output_tokens', 'updated_at'],
             array_keys($schema['dmlab_typesafe_usage']['column'])
+        );
+        $xml = simplexml_load_file(dirname(__DIR__, 2) . '/etc/db_schema.xml');
+        $output = $xml->xpath('//table[@name="dmlab_typesafe_usage"]/column[@name="output_tokens"]')[0];
+        $xsi = $output->attributes('http://www.w3.org/2001/XMLSchema-instance');
+        self::assertSame('bigint', (string)$xsi['type']);
+        self::assertSame(
+            ['unsigned' => 'true', 'nullable' => 'false', 'default' => '0'],
+            [
+                'unsigned' => (string)$output['unsigned'],
+                'nullable' => (string)$output['nullable'],
+                'default' => (string)$output['default'],
+            ]
         );
         self::assertSame(
             ['PRIMARY', 'DMLAB_TYPESAFE_USAGE_PERIOD_CONSUMER'],

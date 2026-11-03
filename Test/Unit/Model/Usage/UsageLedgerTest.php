@@ -90,7 +90,7 @@ class UsageLedgerTest extends TestCase
     }
 
     /**
-     * @return array<string, array{bool, int, array<string, int>, array<string, string>}>
+     * @return array<string, array{bool, int, int, array<string, int>, array<string, string>}>
      */
     public static function recordProvider(): array
     {
@@ -98,24 +98,38 @@ class UsageLedgerTest extends TestCase
             'live call' => [
                 false,
                 120,
-                ['requests' => 1, 'cache_hits' => 0, 'input_tokens' => 120],
+                35,
+                ['requests' => 1, 'cache_hits' => 0, 'input_tokens' => 120, 'output_tokens' => 35],
                 [
                     'requests' => 'requests + 1',
                     'cache_hits' => 'cache_hits + 0',
                     'input_tokens' => 'input_tokens + 120',
+                    'output_tokens' => 'output_tokens + 35',
                 ],
             ],
             'cache hit' => [
                 true,
                 0,
-                ['requests' => 0, 'cache_hits' => 1, 'input_tokens' => 0],
-                ['requests' => 'requests + 0', 'cache_hits' => 'cache_hits + 1', 'input_tokens' => 'input_tokens + 0'],
+                0,
+                ['requests' => 0, 'cache_hits' => 1, 'input_tokens' => 0, 'output_tokens' => 0],
+                [
+                    'requests' => 'requests + 0',
+                    'cache_hits' => 'cache_hits + 1',
+                    'input_tokens' => 'input_tokens + 0',
+                    'output_tokens' => 'output_tokens + 0',
+                ],
             ],
             'negative tokens clamped' => [
                 false,
                 -5,
-                ['requests' => 1, 'cache_hits' => 0, 'input_tokens' => 0],
-                ['requests' => 'requests + 1', 'cache_hits' => 'cache_hits + 0', 'input_tokens' => 'input_tokens + 0'],
+                -3,
+                ['requests' => 1, 'cache_hits' => 0, 'input_tokens' => 0, 'output_tokens' => 0],
+                [
+                    'requests' => 'requests + 1',
+                    'cache_hits' => 'cache_hits + 0',
+                    'input_tokens' => 'input_tokens + 0',
+                    'output_tokens' => 'output_tokens + 0',
+                ],
             ],
         ];
     }
@@ -125,8 +139,13 @@ class UsageLedgerTest extends TestCase
      * @param array<string, string> $increments
      */
     #[DataProvider('recordProvider')]
-    public function testRecordUpsertsIncrements(bool $hit, int $tokens, array $counters, array $increments): void
-    {
+    public function testRecordUpsertsIncrements(
+        bool $hit,
+        int $tokens,
+        int $outputTokens,
+        array $counters,
+        array $increments
+    ): void {
         $this->connectionMock()->expects(self::once())->method('insertOnDuplicate')->willReturnCallback(
             function (string $table, array $data, array $fields) use ($counters, $increments) {
                 self::assertSame('pfx_dmlab_typesafe_usage', $table);
@@ -140,7 +159,19 @@ class UsageLedgerTest extends TestCase
             }
         );
 
-        $this->ledger()->record('catalog_enrich', $tokens, $hit);
+        $this->ledger()->record('catalog_enrich', $tokens, $hit, $outputTokens);
+    }
+
+    public function testRecordOutputTokensDefaultToZero(): void
+    {
+        $this->connectionMock()->expects(self::once())->method('insertOnDuplicate')->willReturnCallback(
+            static function (string $table, array $data): int {
+                self::assertSame(0, $data['output_tokens']);
+                return 1;
+            }
+        );
+
+        $this->ledger()->record('catalog_enrich', 10, false);
     }
 
     public function testRecordDbExceptionIsLoggedOnly(): void
@@ -149,6 +180,21 @@ class UsageLedgerTest extends TestCase
         $this->loggerMock()->expects(self::once())->method('warning')->with(self::stringContains('db down'));
 
         $this->ledger()->record('catalog_enrich', 5, false);
+    }
+
+    public function testMonthTokensSumInputAndOutput(): void
+    {
+        $select = $this->select(true);
+        $select->expects(self::once())->method('from')->willReturnCallback(
+            static function (string $table, array $columns) use ($select) {
+                self::assertSame('pfx_dmlab_typesafe_usage', $table);
+                self::assertSame('SUM(input_tokens + output_tokens)', (string)$columns[0]);
+                return $select;
+            }
+        );
+        $this->connection->method('fetchOne')->willReturn('42');
+
+        self::assertSame(42, $this->ledger()->getMonthTokens());
     }
 
     public function testMonthTokensForAllConsumers(): void
@@ -212,14 +258,38 @@ class UsageLedgerTest extends TestCase
         $select = $this->select(true);
         $select->expects(self::once())->method('order')->with('consumer ASC')->willReturnSelf();
         $this->connection->method('fetchAll')->willReturn([
-            ['consumer' => 'catalog_enrich', 'requests' => '3', 'cache_hits' => '2', 'input_tokens' => '900'],
-            ['consumer' => 'catalog_enrich_calibrate', 'requests' => '1', 'cache_hits' => '0', 'input_tokens' => '50'],
+            [
+                'consumer' => 'catalog_enrich',
+                'requests' => '3',
+                'cache_hits' => '2',
+                'input_tokens' => '900',
+                'output_tokens' => '40',
+            ],
+            [
+                'consumer' => 'catalog_enrich_calibrate',
+                'requests' => '1',
+                'cache_hits' => '0',
+                'input_tokens' => '50',
+                'output_tokens' => '0',
+            ],
         ]);
 
         self::assertSame(
             [
-                ['consumer' => 'catalog_enrich', 'requests' => 3, 'cache_hits' => 2, 'input_tokens' => 900],
-                ['consumer' => 'catalog_enrich_calibrate', 'requests' => 1, 'cache_hits' => 0, 'input_tokens' => 50],
+                [
+                    'consumer' => 'catalog_enrich',
+                    'requests' => 3,
+                    'cache_hits' => 2,
+                    'input_tokens' => 900,
+                    'output_tokens' => 40,
+                ],
+                [
+                    'consumer' => 'catalog_enrich_calibrate',
+                    'requests' => 1,
+                    'cache_hits' => 0,
+                    'input_tokens' => 50,
+                    'output_tokens' => 0,
+                ],
             ],
             $this->ledger()->getRows('2026-09')
         );

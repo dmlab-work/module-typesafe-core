@@ -7,7 +7,10 @@ declare(strict_types=1);
 
 namespace DmLab\TypeSafeCore\Console\Command;
 
+use DmLab\TypeSafeCore\Exception\NotConfiguredException;
 use DmLab\TypeSafeCore\Model\Config;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\TypeSafeProvider;
 use DmLab\TypeSafeCore\Model\Usage\UsageLedger;
 use Magento\Framework\Stdlib\DateTime\DateTime;
 use Symfony\Component\Console\Command\Command;
@@ -17,7 +20,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * `dmlab:typesafe:usage` — per-consumer usage of a UTC month with the estimated cost.
+ * `dmlab:typesafe:usage` — per-consumer usage of a UTC month; estimated cost for TypeSafe only.
  */
 class UsageCommand extends Command
 {
@@ -29,11 +32,13 @@ class UsageCommand extends Command
      * @param UsageLedger $usageLedger
      * @param Config $config
      * @param DateTime $dateTime
+     * @param ProviderPool $providerPool
      */
     public function __construct(
         private readonly UsageLedger $usageLedger,
         private readonly Config $config,
-        private readonly DateTime $dateTime
+        private readonly DateTime $dateTime,
+        private readonly ProviderPool $providerPool
     ) {
         parent::__construct();
     }
@@ -44,7 +49,7 @@ class UsageCommand extends Command
     protected function configure(): void
     {
         $this->setName(self::NAME)
-            ->setDescription('Shows TypeSafe usage per consumer for a month (UTC).')
+            ->setDescription('Shows AI client usage per consumer for a month (UTC).')
             ->addOption(
                 self::OPTION_MONTH,
                 null,
@@ -66,26 +71,39 @@ class UsageCommand extends Command
             return Command::FAILURE;
         }
 
+        $output->writeln('Active provider: ' . $this->getActiveProviderName());
         $rows = $this->usageLedger->getRows($month);
         if ($rows === []) {
-            $output->writeln(sprintf('No TypeSafe usage recorded for %s.', $month));
+            $output->writeln(sprintf('No usage recorded for %s.', $month));
             return Command::SUCCESS;
         }
 
-        $total = ['requests' => 0, 'cache_hits' => 0, 'input_tokens' => 0];
+        $total = ['requests' => 0, 'cache_hits' => 0, 'input_tokens' => 0, 'output_tokens' => 0];
         $table = new Table($output);
-        $table->setHeaders(['Consumer', 'Requests', 'Cache hits', 'Input tokens']);
+        $table->setHeaders(['Consumer', 'Requests', 'Cache hits', 'Input tokens', 'Output tokens']);
         foreach ($rows as $row) {
-            $table->addRow([$row['consumer'], $row['requests'], $row['cache_hits'], $row['input_tokens']]);
+            $table->addRow([
+                $row['consumer'],
+                $row['requests'],
+                $row['cache_hits'],
+                $row['input_tokens'],
+                $row['output_tokens'],
+            ]);
             foreach ($total as $column => $sum) {
                 $total[$column] = $sum + $row[$column];
             }
         }
-        $table->addRow(['Total', $total['requests'], $total['cache_hits'], $total['input_tokens']]);
+        $table->addRow(['Total', ...array_values($total)]);
         $table->render();
 
         $output->writeln(
-            sprintf('Estimated cost: $%.4f', $total['input_tokens'] * UsageLedger::USD_PER_MILLION_TOKENS / 1000000)
+            $this->config->getProvider() === TypeSafeProvider::CODE
+                ? sprintf(
+                    'Estimated cost: $%.4f',
+                    // Same base as the admin usage line (UsageInterface::getMonthTokens()).
+                    ($total['input_tokens'] + $total['output_tokens']) * UsageLedger::USD_PER_MILLION_TOKENS / 1000000
+                )
+                : "Cost: see your provider's billing"
         );
 
         $budget = $this->config->getMonthlyTokenBudget();
@@ -98,5 +116,20 @@ class UsageCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Label and code of the active provider; the bare code when it is not registered.
+     *
+     * @return string
+     */
+    private function getActiveProviderName(): string
+    {
+        $code = $this->config->getProvider();
+        try {
+            return sprintf('%s (%s)', $this->providerPool->get($code)->getLabel(), $code);
+        } catch (NotConfiguredException) {
+            return $code;
+        }
     }
 }

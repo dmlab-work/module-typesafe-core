@@ -13,7 +13,7 @@
                 <resource id="Magento_Backend::stores">
                     <resource id="Magento_Backend::stores_settings">
                         <resource id="Magento_Config::config">
-                            <resource id="DmLab_TypeSafeCore::config" title="TypeSafe Section" sortOrder="10"/>
+                            <resource id="DmLab_TypeSafeCore::config" title="AI Client Section" sortOrder="10"/>
                         </resource>
                     </resource>
                 </resource>

@@ -1,0 +1,18 @@
+{
+    "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-5-5-20261015",
+    "content": [
+        {"type": "text", "text": "{\"q1\":{\"answer\":false,\"confidence\":0.9},\"q2\":{\"choice\":\"wool\",\"confidence\":0.8},\"q3\":{\"score\":2,\"confidence\":0.7}}"}
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+        "input_tokens": 400,
+        "cache_creation_input_tokens": 8,
+        "cache_read_input_tokens": 4,
+        "output_tokens": 38,
+        "service_tier": "standard"
+    }
+}

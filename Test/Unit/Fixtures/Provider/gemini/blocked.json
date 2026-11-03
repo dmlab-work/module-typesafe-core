@@ -1,0 +1,9 @@
+{
+    "promptFeedback": {
+        "blockReason": "PROHIBITED_CONTENT",
+        "safetyRatings": [{"category": "HARM_CATEGORY_HARASSMENT", "probability": "NEGLIGIBLE"}]
+    },
+    "usageMetadata": {"promptTokenCount": 400, "totalTokenCount": 400},
+    "modelVersion": "gemini-3.5-flash-lite-001",
+    "responseId": "c8VMaZvoK4rK2R3UveEG7Vl"
+}

@@ -5,9 +5,8 @@
  */
 declare(strict_types=1);
 
-namespace DmLab\TypeSafeCore\Model;
+namespace DmLab\TypeSafeCore\Model\Provider\TypeSafe;
 
-use DmLab\TypeSafeCore\Api\ConfigInterface;
 use DmLab\TypeSafeCore\Api\Data\Answer\AnswerInterface;
 use DmLab\TypeSafeCore\Api\Data\Answer\ChoiceAnswer;
 use DmLab\TypeSafeCore\Api\Data\Answer\NoulAnswer;
@@ -22,23 +21,16 @@ use DmLab\TypeSafeCore\Exception\TransportException;
 class ResponseParser
 {
     /**
-     * @param ConfigInterface $config
-     */
-    public function __construct(
-        private readonly ConfigInterface $config
-    ) {
-    }
-
-    /**
      * Parse a response body; extra answers are ignored, a cached parse costs 0 tokens.
      *
      * @param string $body
      * @param Request $request
+     * @param string $model resolved model, used when the body names none
      * @param bool $cached
      * @return Response
      * @throws TransportException
      */
-    public function parse(string $body, Request $request, bool $cached): Response
+    public function parse(string $body, Request $request, string $model, bool $cached): Response
     {
         try {
             $data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
@@ -49,9 +41,9 @@ class ResponseParser
             throw $this->malformed('no "answers" object');
         }
 
-        $model = is_string($data['model'] ?? null) && $data['model'] !== ''
-            ? $data['model']
-            : ($request->getModel() ?? $this->config->getModel());
+        if (is_string($data['model'] ?? null) && $data['model'] !== '') {
+            $model = $data['model'];
+        }
         $usage = is_array($data['usage'] ?? null) ? $data['usage'] : [];
         $tokens = $cached ? 0 : max(0, (int)($usage['input_tokens'] ?? 0));
 

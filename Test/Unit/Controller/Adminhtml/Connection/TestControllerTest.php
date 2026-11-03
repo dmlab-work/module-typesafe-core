@@ -10,9 +10,13 @@ namespace DmLab\TypeSafeCore\Test\Unit\Controller\Adminhtml\Connection;
 use DmLab\TypeSafeCore\Controller\Adminhtml\Connection\Test;
 use DmLab\TypeSafeCore\Exception\AuthenticationException;
 use DmLab\TypeSafeCore\Model\Config;
-use DmLab\TypeSafeCore\Model\Connection\ModelLister;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
+use DmLab\TypeSafeCore\Model\Provider\ProviderSettings;
+use DmLab\TypeSafeCore\Test\Unit\Fake\FakeProvider;
 use Magento\Backend\App\Action\Context;
 use Magento\Framework\App\Action\HttpPostActionInterface;
+use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Controller\Result\Json;
 use Magento\Framework\Controller\Result\JsonFactory;
 use PHPUnit\Framework\TestCase;
@@ -29,7 +33,16 @@ class TestControllerTest extends TestCase
     /** @var bool */
     private bool $enabled = true;
 
-    private function controller(ModelLister $lister): Test
+    /** @var string */
+    private string $active = 'typesafe';
+
+    /** @var array<string, array|\Throwable> code => listModels() result */
+    private array $results = [];
+
+    /** @var string[] codes whose models were listed */
+    private array $listed = [];
+
+    private function execute(?string $provider): void
     {
         $json = $this->createStub(Json::class);
         $json->method('setData')->willReturnCallback(function ($data) use (&$json) {
@@ -47,34 +60,56 @@ class TestControllerTest extends TestCase
 
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn () => $this->enabled);
-        $config->method('getModel')->willReturn('jev-1.13.0');
+        $config->method('getProvider')->willReturnCallback(fn () => $this->active);
 
-        return new Test($this->createStub(Context::class), $factory, $lister, $logger, $config);
+        $request = $this->createStub(RequestInterface::class);
+        $request->method('getParam')->willReturnCallback(
+            static fn ($key) => $key === Test::PARAM_PROVIDER ? $provider : null
+        );
+        $context = $this->createStub(Context::class);
+        $context->method('getRequest')->willReturn($request);
+
+        $result = (new Test($context, $factory, $this->pool(), $logger, $config))->execute();
+        $this->assertInstanceOf(Json::class, $result);
     }
 
-    private function lister(array|\Throwable $result): ModelLister
+    private function pool(): ProviderPool
     {
-        $lister = $this->createStub(ModelLister::class);
-        if ($result instanceof \Throwable) {
-            $lister->method('listModels')->willThrowException($result);
-        } else {
-            $lister->method('listModels')->willReturn($result);
+        $settings = new ProviderSettings($this->createStub(ScopeConfigInterface::class));
+        $providers = [];
+        foreach (['typesafe' => 'TypeSafe', 'anthropic' => 'Anthropic API'] as $code => $label) {
+            $provider = $this->createStub(FakeProvider::class);
+            $provider->method('getCode')->willReturn($code);
+            $provider->method('getLabel')->willReturn($label);
+            $provider->method('getModel')->willReturn($code === 'typesafe' ? 'jev-1.13.0' : 'claude-haiku-5-5');
+            $provider->method('listModels')->willReturnCallback(function () use ($code): array {
+                $this->listed[] = $code;
+                $result = $this->results[$code] ?? [];
+                if ($result instanceof \Throwable) {
+                    throw $result;
+                }
+
+                return $result;
+            });
+            $providers[$code] = $provider;
         }
 
-        return $lister;
+        return new ProviderPool($settings, $providers);
     }
 
     public function testIsPostOnlyAndAclGuarded(): void
     {
-        $this->assertInstanceOf(HttpPostActionInterface::class, $this->controller($this->lister([])));
+        $this->assertTrue(is_a(Test::class, HttpPostActionInterface::class, true));
         $this->assertSame('DmLab_TypeSafeCore::config', Test::ADMIN_RESOURCE);
     }
 
-    public function testSuccessListsModelsAndNotesAnUnlistedConfiguredModel(): void
+    public function testTypeSafeSuccessListsModelsAndNotesAliases(): void
     {
-        $result = $this->controller($this->lister(['jev-latest', 'jev-preview']))->execute();
+        $this->results['typesafe'] = ['jev-latest', 'jev-preview'];
 
-        $this->assertInstanceOf(Json::class, $result);
+        $this->execute('typesafe');
+
+        $this->assertSame(['typesafe'], $this->listed);
         $this->assertSame(
             [
                 'success' => true,
@@ -88,7 +123,9 @@ class TestControllerTest extends TestCase
 
     public function testListedConfiguredModelHasNoNote(): void
     {
-        $this->controller($this->lister(['jev-1.13.0', 'jev-latest']))->execute();
+        $this->results['typesafe'] = ['jev-1.13.0', 'jev-latest'];
+
+        $this->execute('typesafe');
 
         $this->assertSame(
             [
@@ -100,32 +137,114 @@ class TestControllerTest extends TestCase
         );
     }
 
-    public function testDisabledModuleStillSucceedsWithAWarning(): void
+    public function testActiveOtherProviderUsesItsOwnModelsAndNote(): void
     {
-        $this->enabled = false;
+        $this->active = 'anthropic';
+        $this->results['anthropic'] = ['claude-sonnet-5-5'];
 
-        $this->controller($this->lister(['jev-1.13.0']))->execute();
+        $this->execute('anthropic');
 
+        $this->assertSame(['anthropic'], $this->listed);
         $this->assertSame(
             [
                 'success' => true,
-                'message' => 'Connected to TypeSafe. Models: jev-1.13.0',
-                'model' => 'Configured model: jev-1.13.0',
-                'warning' => 'TypeSafe is disabled: enable it to use it.',
+                'message' => 'Connected to Anthropic API. Models: claude-sonnet-5-5',
+                'model' => 'Configured model: claude-haiku-5-5',
+                'note' => 'The configured model is not in the list; check its id.',
             ],
             $this->data
         );
     }
 
-    public function testDisabledModuleFailureHasNoWarning(): void
+    public function testInactiveProviderSucceedsWithAWarning(): void
+    {
+        $this->results['anthropic'] = ['claude-haiku-5-5'];
+
+        $this->execute('anthropic');
+
+        $this->assertSame(
+            [
+                'success' => true,
+                'message' => 'Connected to Anthropic API. Models: claude-haiku-5-5',
+                'model' => 'Configured model: claude-haiku-5-5',
+                'warning' => 'Anthropic API is not the active provider: select it under General to use it.',
+            ],
+            $this->data
+        );
+    }
+
+    public function testDisabledModuleStillSucceedsWithAWarning(): void
     {
         $this->enabled = false;
+        $this->results['typesafe'] = ['jev-1.13.0'];
 
-        $this->controller($this->lister(
-            new AuthenticationException(__('TypeSafe rejected the API key (HTTP %1).', 401), null, 401)
-        ))->execute();
+        $this->execute('typesafe');
 
-        $this->assertSame(['success' => false, 'message' => 'TypeSafe rejected the API key (HTTP 401).'], $this->data);
+        $this->assertSame('The AI client is disabled: enable it to use it.', $this->data['warning']);
+        $this->assertTrue($this->data['success']);
+    }
+
+    public function testDisabledAndInactiveWarningsAreJoined(): void
+    {
+        $this->enabled = false;
+        $this->results['anthropic'] = ['claude-haiku-5-5'];
+
+        $this->execute('anthropic');
+
+        $this->assertSame(
+            'The AI client is disabled: enable it to use it. '
+            . 'Anthropic API is not the active provider: select it under General to use it.',
+            $this->data['warning']
+        );
+    }
+
+    /**
+     * @return array<string, array{string|null, string}>
+     */
+    public static function unknownCodeProvider(): array
+    {
+        return [
+            'unknown' => ['openai', 'Unknown AI provider "openai".'],
+            'missing' => [null, 'Unknown AI provider "".'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unknownCodeProvider')]
+    public function testUnknownProviderIsRejected(?string $code, string $message): void
+    {
+        $this->execute($code);
+
+        $this->assertSame(['success' => false, 'message' => $message], $this->data);
+        $this->assertSame([], $this->listed);
+        $this->assertSame([], $this->errors);
+    }
+
+    public function testProviderErrorReturnsItsMessageWithoutWarning(): void
+    {
+        $this->enabled = false;
+        $this->results['anthropic'] = new AuthenticationException(
+            __('%1 rejected the API key (HTTP %2).', 'Anthropic API', 401),
+            null,
+            401
+        );
+
+        $this->execute('anthropic');
+
+        $this->assertSame(
+            ['success' => false, 'message' => 'Anthropic API rejected the API key (HTTP 401).'],
+            $this->data
+        );
+        $this->assertSame([], $this->errors);
+    }
+
+    public function testUnexpectedThrowableIsReportedNotRaised(): void
+    {
+        $this->results['anthropic'] = new \TypeError('boom');
+
+        $this->execute('anthropic');
+
+        $this->assertSame(['success' => false, 'message' => 'Anthropic API client error: boom'], $this->data);
+        $this->assertSame(['Anthropic API connection test failed: boom'], $this->errors);
     }
 
     public function testScriptTranslatesItsOwnTextAndShowsTheWarning(): void
@@ -137,23 +256,5 @@ class TestControllerTest extends TestCase
         $this->assertStringContainsString('data.warning', $js);
         $this->assertStringContainsString('data.model', $js);
         $this->assertStringContainsString('data.note', $js);
-    }
-
-    public function testTypeSafeFailureReturnsItsMessage(): void
-    {
-        $this->controller($this->lister(
-            new AuthenticationException(__('TypeSafe rejected the API key (HTTP %1).', 401), null, 401)
-        ))->execute();
-
-        $this->assertSame(['success' => false, 'message' => 'TypeSafe rejected the API key (HTTP 401).'], $this->data);
-        $this->assertSame([], $this->errors);
-    }
-
-    public function testUnexpectedThrowableIsReportedNotRaised(): void
-    {
-        $this->controller($this->lister(new \TypeError('boom')))->execute();
-
-        $this->assertSame(['success' => false, 'message' => 'TypeSafe client error: boom'], $this->data);
-        $this->assertCount(1, $this->errors);
     }
 }

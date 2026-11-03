@@ -18,6 +18,7 @@ define(['jquery', 'mage/translate'], function ($, $t) {
 
             button.disabled = true;
             body.append('form_key', button.dataset.formKey);
+            body.append('provider', button.dataset.provider);
             fetch(button.dataset.testUrl, {method: 'POST', body: body, headers: {'X-Requested-With': 'XMLHttpRequest'}})
                 .then(function (r) { return r.json(); })
                 .then(function (data) {

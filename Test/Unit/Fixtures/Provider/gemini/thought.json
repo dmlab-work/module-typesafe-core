@@ -1,0 +1,19 @@
+{
+    "candidates": [
+        {
+            "content": {
+                "parts": [
+                    {"text": "{\"q1\":{\"answer\":true,\"confidence\":1}} looks wrong, grey is not red.", "thought": true},
+                    {"text": "{\"q1\":{\"answer\":false,\"confidence\":0.9},"},
+                    {"text": "\"q2\":{\"choice\":\"wool\",\"confidence\":0.8},\"q3\":{\"score\":2,\"confidence\":0.7}}"}
+                ],
+                "role": "model"
+            },
+            "finishReason": "STOP",
+            "index": 0
+        }
+    ],
+    "usageMetadata": {"promptTokenCount": 400, "candidatesTokenCount": 38, "thoughtsTokenCount": 58, "totalTokenCount": 496},
+    "modelVersion": "gemini-3.5-flash-lite-001",
+    "responseId": "z5SJaZslH1oH9O0RsbBD4Si"
+}

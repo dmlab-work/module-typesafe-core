@@ -34,6 +34,8 @@
                 comment="Cache Hits"/>
         <column xsi:type="bigint" name="input_tokens" unsigned="true" nullable="false" default="0"
                 comment="Input Tokens"/>
+        <column xsi:type="bigint" name="output_tokens" unsigned="true" nullable="false" default="0"
+                comment="Output Tokens"/>
         <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false"
                 default="CURRENT_TIMESTAMP" comment="Updated At"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">

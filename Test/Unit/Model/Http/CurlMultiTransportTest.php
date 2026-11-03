@@ -143,7 +143,7 @@ class CurlMultiTransportTest extends TestCase
     {
         $requests = [];
         for ($i = 0; $i < 3; $i++) {
-            $requests[] = new HttpRequest('GET', self::$baseUrl . '/sleep/400', [], null, 5);
+            $requests[] = new HttpRequest('GET', self::$baseUrl . '/sleep/1000', [], null, 5);
         }
 
         $start = microtime(true);
@@ -153,7 +153,8 @@ class CurlMultiTransportTest extends TestCase
         foreach ($responses as $response) {
             $this->assertSame(200, $response->getStatus());
         }
-        $this->assertLessThan(1.0, $elapsed);
+        // Serial would take 3 s; below 2.5 s tolerates two of the three running back to back.
+        $this->assertLessThan(2.5, $elapsed);
     }
 
     public function testTimeoutIsATransportError(): void

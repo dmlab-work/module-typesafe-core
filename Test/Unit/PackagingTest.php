@@ -23,7 +23,10 @@ class PackagingTest extends TestCase
 
         self::assertSame('dmlab/module-typesafe-core', $composer['name']);
         self::assertSame('magento2-module', $composer['type']);
-        self::assertSame('0.0.2', $composer['version']);
+        self::assertSame('0.1.0', $composer['version']);
+        foreach (['typesafe', 'openai', 'anthropic', 'gemini'] as $keyword) {
+            self::assertContains($keyword, $composer['keywords']);
+        }
         self::assertSame('OSL-3.0', $composer['license']);
         self::assertSame('https://github.com/dmlab-work/module-typesafe-core', $composer['homepage']);
         self::assertSame(
@@ -111,7 +114,8 @@ class PackagingTest extends TestCase
             array_push($phrases, ...$matches[1]);
         }
         self::assertContains('Monthly Token Budget', $phrases);
-        self::assertContains('TypeSafe Section', $phrases);
+        self::assertContains('AI Client Section', $phrases);
+        self::assertContains('Send Temperature', $phrases);
         self::assertContains('Connection test request failed.', $phrases);
 
         self::assertSame(
@@ -144,6 +148,7 @@ class PackagingTest extends TestCase
     {
         $changelog = $this->read('CHANGELOG.md');
         self::assertStringStartsWith("# Changelog\n\n## {$this->composer()['version']}\n", $changelog);
+        self::assertStringContainsString("\n## 0.0.2\n", $changelog);
         self::assertStringContainsString("\n## 0.0.1\n", $changelog);
 
         $attributes = $this->read('.gitattributes');

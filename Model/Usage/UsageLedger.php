@@ -42,13 +42,15 @@ class UsageLedger implements UsageInterface
      * @param string $consumer
      * @param int $inputTokens
      * @param bool $cacheHit
+     * @param int $outputTokens
      * @return void
      */
-    public function record(string $consumer, int $inputTokens, bool $cacheHit): void
+    public function record(string $consumer, int $inputTokens, bool $cacheHit, int $outputTokens = 0): void
     {
         $requests = $cacheHit ? 0 : 1;
         $hits = $cacheHit ? 1 : 0;
         $tokens = max(0, $inputTokens);
+        $output = max(0, $outputTokens);
 
         try {
             $this->resource->getConnection()->insertOnDuplicate(
@@ -59,11 +61,13 @@ class UsageLedger implements UsageInterface
                     'requests' => $requests,
                     'cache_hits' => $hits,
                     'input_tokens' => $tokens,
+                    'output_tokens' => $output,
                 ],
                 [
                     'requests' => new Expression('requests + ' . $requests),
                     'cache_hits' => new Expression('cache_hits + ' . $hits),
                     'input_tokens' => new Expression('input_tokens + ' . $tokens),
+                    'output_tokens' => new Expression('output_tokens + ' . $output),
                 ]
             );
         } catch (\Exception $e) {
@@ -78,7 +82,7 @@ class UsageLedger implements UsageInterface
     {
         $connection = $this->resource->getConnection();
         $select = $connection->select()
-            ->from($this->resource->getTableName(self::TABLE), [new Expression('SUM(input_tokens)')])
+            ->from($this->resource->getTableName(self::TABLE), [new Expression('SUM(input_tokens + output_tokens)')])
             ->where('period = ?', $this->currentPeriod());
         if ($consumer !== null) {
             $select->where('consumer = ?', $consumer);
@@ -104,7 +108,8 @@ class UsageLedger implements UsageInterface
      * Usage rows of a period (`Y-m`), ordered by consumer.
      *
      * @param string $period
-     * @return array<int, array{consumer: string, requests: int, cache_hits: int, input_tokens: int}>
+     * @return array<int, array{consumer: string, requests: int, cache_hits: int, input_tokens: int,
+     *     output_tokens: int}>
      */
     public function getRows(string $period): array
     {
@@ -112,7 +117,7 @@ class UsageLedger implements UsageInterface
         $select = $connection->select()
             ->from(
                 $this->resource->getTableName(self::TABLE),
-                ['consumer', 'requests', 'cache_hits', 'input_tokens']
+                ['consumer', 'requests', 'cache_hits', 'input_tokens', 'output_tokens']
             )
             ->where('period = ?', $period)
             ->order('consumer ASC');
@@ -124,6 +129,7 @@ class UsageLedger implements UsageInterface
                 'requests' => (int)$row['requests'],
                 'cache_hits' => (int)$row['cache_hits'],
                 'input_tokens' => (int)$row['input_tokens'],
+                'output_tokens' => (int)$row['output_tokens'],
             ];
         }
 

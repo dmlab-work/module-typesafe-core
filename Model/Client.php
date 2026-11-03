@@ -10,9 +10,11 @@ namespace DmLab\TypeSafeCore\Model;
 use DmLab\TypeSafeCore\Api\ClientInterface;
 use DmLab\TypeSafeCore\Api\Data\Request;
 use DmLab\TypeSafeCore\Api\Data\Response;
+use DmLab\TypeSafeCore\Api\ProviderInterface;
 use DmLab\TypeSafeCore\Exception\AuthenticationException;
 use DmLab\TypeSafeCore\Exception\BudgetExceededException;
 use DmLab\TypeSafeCore\Exception\CircuitOpenException;
+use DmLab\TypeSafeCore\Exception\InvalidAnswerException;
 use DmLab\TypeSafeCore\Exception\NotConfiguredException;
 use DmLab\TypeSafeCore\Exception\RateLimitException;
 use DmLab\TypeSafeCore\Exception\RequestException;
@@ -22,27 +24,27 @@ use DmLab\TypeSafeCore\Model\Cache\ResponseCache;
 use DmLab\TypeSafeCore\Model\Http\Backoff;
 use DmLab\TypeSafeCore\Model\Http\CircuitBreaker;
 use DmLab\TypeSafeCore\Model\Http\Clock;
-use DmLab\TypeSafeCore\Model\Http\HttpRequest;
 use DmLab\TypeSafeCore\Model\Http\HttpResponse;
 use DmLab\TypeSafeCore\Model\Http\RateLimitGuard;
 use DmLab\TypeSafeCore\Model\Http\TransportInterface;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
 use DmLab\TypeSafeCore\Model\Usage\UsageLedger;
 use Magento\Framework\Phrase;
 use Psr\Log\LoggerInterface;
 
 /**
- * TypeSafe client: request cache first, then budget- and circuit-guarded parallel waves.
+ * AI client over the active provider: request cache first, then budget- and circuit-guarded parallel waves.
  */
 class Client implements ClientInterface
 {
-    public const ENDPOINT = '/v1/systemone';
     public const MAX_RETRY_AFTER = 60;
+    private const FALLBACK_LABEL = 'AI';
     private const ERROR_SNIPPET_LENGTH = 200;
 
     /**
      * @param Config $config
      * @param RequestEncoder $encoder
-     * @param ResponseParser $parser
+     * @param ProviderPool $providerPool
      * @param ResponseCache $cache
      * @param UsageLedger $ledger
      * @param CircuitBreaker $circuitBreaker
@@ -55,7 +57,7 @@ class Client implements ClientInterface
     public function __construct(
         private readonly Config $config,
         private readonly RequestEncoder $encoder,
-        private readonly ResponseParser $parser,
+        private readonly ProviderPool $providerPool,
         private readonly ResponseCache $cache,
         private readonly UsageLedger $ledger,
         private readonly CircuitBreaker $circuitBreaker,
@@ -86,22 +88,24 @@ class Client implements ClientInterface
     public function evaluateMany(array $requests): array
     {
         $results = [];
+        $label = self::FALLBACK_LABEL;
         try {
-            $apiKey = $this->resolveApiKey($requests, $results);
-            if ($apiKey !== null) {
+            $provider = $requests !== [] ? $this->resolveProvider($requests, $results) : null;
+            if ($provider !== null) {
+                $label = $provider->getLabel();
                 $duplicates = [];
-                $pending = $this->serveCached($requests, $results, $duplicates);
+                $pending = $this->serveCached($provider, $requests, $results, $duplicates);
                 $stop = null;
                 foreach (array_chunk($pending, $this->config->getConcurrency(), true) as $wave) {
-                    $this->sendWave($wave, $apiKey, $results, $stop);
+                    $this->sendWave($provider, $wave, $results, $stop);
                 }
                 $this->resolveDuplicates($requests, $duplicates, $results);
             }
         } catch (\Throwable $e) {
-            $this->logger->error('TypeSafe client error: ' . $e->getMessage());
+            $this->logger->error($label . ' client error: ' . $e->getMessage());
             foreach (array_keys($requests) as $key) {
                 $results[$key] ??= new TransportException(
-                    __('TypeSafe client error: %1', $e->getMessage()),
+                    __('%1 client error: %2', $label, $e->getMessage()),
                     $e instanceof \Exception ? $e : null
                 );
             }
@@ -116,26 +120,28 @@ class Client implements ClientInterface
     }
 
     /**
-     * API key when the client is usable; otherwise every key gets NotConfiguredException and null is returned.
+     * Active provider when the client is usable; otherwise every key gets NotConfiguredException and null is returned.
      *
      * @param array $requests
      * @param array $results
-     * @return string|null
+     * @return ProviderInterface|null
      */
-    private function resolveApiKey(array $requests, array &$results): ?string
+    private function resolveProvider(array $requests, array &$results): ?ProviderInterface
     {
-        if (!$this->config->isEnabled()) {
-            $phrase = 'TypeSafe is disabled.';
-        } else {
-            $apiKey = $this->config->getApiKey();
-            if ($apiKey !== '') {
-                return $apiKey;
+        try {
+            $provider = $this->providerPool->getActive();
+            if (!$this->config->isEnabled()) {
+                throw new NotConfiguredException(__('%1 is disabled.', $provider->getLabel()));
             }
-            $phrase = 'TypeSafe API key is not set.';
-        }
+            if (!$provider->isConfigured()) {
+                throw new NotConfiguredException(__('%1 API key is not set.', $provider->getLabel()));
+            }
 
-        foreach (array_keys($requests) as $key) {
-            $results[$key] = new NotConfiguredException(__($phrase));
+            return $provider;
+        } catch (NotConfiguredException $e) {
+            foreach (array_keys($requests) as $key) {
+                $results[$key] = $this->replicate($e);
+            }
         }
 
         return null;
@@ -146,37 +152,47 @@ class Client implements ClientInterface
      *
      * A miss whose cache key is already pending is not sent again: it goes to $duplicates as index => primary index.
      *
+     * @param ProviderInterface $provider
      * @param Request[] $requests
      * @param array $results
      * @param array $duplicates index => primary index
-     * @return array[] misses as {request, model, key, body}
+     * @return array[] misses as {request, model, key, http, repaired}
      */
-    private function serveCached(array $requests, array &$results, array &$duplicates): array
-    {
+    private function serveCached(
+        ProviderInterface $provider,
+        array $requests,
+        array &$results,
+        array &$duplicates
+    ): array {
         $pending = [];
         $primaries = [];
         foreach ($requests as $index => $request) {
             $model = $this->encoder->resolveModel($request);
             try {
-                $key = $this->encoder->cacheKey($request, $model);
+                $key = $this->encoder->cacheKey($request, $model, $provider);
                 if (isset($primaries[$key])) {
                     $duplicates[$index] = $primaries[$key];
                     continue;
                 }
-                $body = $this->encoder->body($request, $model);
+                $hit = $this->cachedResponse($provider, $key, $request, $model);
+                if ($hit !== null) {
+                    $results[$index] = $hit;
+                    $this->ledger->record($request->getConsumer(), 0, true);
+                    continue;
+                }
+                $http = $provider->buildRequest($request, $model, null);
             } catch (RequestException $e) {
                 $results[$index] = $e;
                 continue;
             }
 
-            $hit = $this->cachedResponse($key, $request);
-            if ($hit !== null) {
-                $results[$index] = $hit;
-                $this->ledger->record($request->getConsumer(), 0, true);
-                continue;
-            }
-
-            $pending[$index] = ['request' => $request, 'model' => $model, 'key' => $key, 'body' => $body];
+            $pending[$index] = [
+                'request' => $request,
+                'model' => $model,
+                'key' => $key,
+                'http' => $http,
+                'repaired' => false,
+            ];
             $primaries[$key] = $index;
         }
 
@@ -207,18 +223,24 @@ class Client implements ClientInterface
     /**
      * Cached response for the key; an unreadable cached body counts as a miss and is overwritten by the live answer.
      *
+     * @param ProviderInterface $provider
      * @param string $key
      * @param Request $request
+     * @param string $model
      * @return Response|null
      */
-    private function cachedResponse(string $key, Request $request): ?Response
-    {
+    private function cachedResponse(
+        ProviderInterface $provider,
+        string $key,
+        Request $request,
+        string $model
+    ): ?Response {
         $body = $this->cache->get($key);
         if ($body === null) {
             return null;
         }
         try {
-            return $this->parser->parse($body, $request, true);
+            return $provider->parseResponse($body, $request, $model, true);
         } catch (TransportException $e) {
             return null;
         }
@@ -227,18 +249,20 @@ class Client implements ClientInterface
     /**
      * Send one wave of misses, retrying failed keys up to the attempt limit while the circuit and budget allow.
      *
-     * A final 401/403 or rate limit sets $stop; every key still unanswered then gets a copy of it without HTTP.
-     * A final rate limit also pauses later calls via RateLimitGuard.
+     * An error the provider classifies is final. A final 401/403 or 429 sets $stop; every key still
+     * unanswered then gets a copy of it without HTTP. A final rate limit also pauses later calls via RateLimitGuard.
+     * An invalid answer is resent once with a repair note in the next round, without sleeping and without counting
+     * as a circuit failure.
      *
-     * @param array[] $wave misses as {request, model, key, body}
-     * @param string $apiKey
+     * @param ProviderInterface $provider
+     * @param array[] $wave misses as {request, model, key, http, repaired}
      * @param array $results
      * @param TypeSafeException|null $stop
      * @return void
      */
     private function sendWave(
+        ProviderInterface $provider,
         array $wave,
-        #[\SensitiveParameter] string $apiKey,
         array &$results,
         ?TypeSafeException &$stop
     ): void {
@@ -251,38 +275,51 @@ class Client implements ClientInterface
                 }
                 return;
             }
-            if ($this->refuseIfBlocked($todo, $results)) {
+            if ($this->refuseIfBlocked($provider->getLabel(), $todo, $results)) {
                 return;
             }
 
             $httpRequests = [];
             foreach ($todo as $index => $item) {
-                $httpRequests[$index] = $this->httpRequest($item['body'], $apiKey);
+                $httpRequests[$index] = $item['http'];
             }
             $responses = $this->transport->sendMany($httpRequests);
 
             $failures = 0;
             $anySuccess = false;
             $retry = [];
-            $wait = 0.0;
+            $wait = null;
             foreach ($todo as $index => $item) {
                 $response = $responses[$index];
                 $status = $response->getStatus();
                 if (!$response->isTransportError() && $status >= 200 && $status < 300) {
-                    $results[$index] = $this->succeed($item, $response);
-                    $anySuccess = $anySuccess || $results[$index] instanceof Response;
+                    $result = $this->succeed($provider, $item, $response);
+                    if ($result instanceof InvalidAnswerException && !$item['repaired']) {
+                        try {
+                            $retry[$index] = $this->repair($provider, $item, $result);
+                        } catch (RequestException $e) {
+                            $results[$index] = $e;
+                        }
+                        continue;
+                    }
+                    $results[$index] = $result;
+                    $anySuccess = $anySuccess || $result instanceof Response;
                     continue;
                 }
 
-                $this->logFailure($item, $response, $attempt, $maxAttempts);
+                $this->logFailure($provider->getLabel(), $item, $response, $attempt, $maxAttempts);
                 if ($this->isServerFailure($response)) {
                     $failures++;
                 }
-                $delay = $attempt < $maxAttempts ? $this->retryDelay($response, $attempt) : null;
+                $classified = $response->isTransportError() ? null : $provider->classifyError($response);
+                $delay = $classified === null && $attempt < $maxAttempts
+                    ? $this->retryDelay($provider, $response, $attempt)
+                    : null;
                 if ($delay === null) {
-                    $results[$index] = $this->fail($response);
+                    $results[$index] = $classified ?? $this->fail($provider, $response);
                     if ($stop === null && ($results[$index] instanceof AuthenticationException
-                        || $results[$index] instanceof RateLimitException)
+                        || $results[$index] instanceof RateLimitException
+                        || $results[$index]->getCode() === 429)
                     ) {
                         $stop = $results[$index];
                         if ($stop instanceof RateLimitException) {
@@ -292,12 +329,12 @@ class Client implements ClientInterface
                     continue;
                 }
                 $retry[$index] = $item;
-                $wait = max($wait, $delay);
+                $wait = max($wait ?? 0.0, $delay);
             }
 
             // One failing round counts once, so parallel failures cannot open the circuit before retries happen.
             $this->circuitBreaker->record($failures > 0 ? 1 : 0, $anySuccess);
-            if ($retry !== [] && $stop === null) {
+            if ($wait !== null && $stop === null) {
                 $this->clock->sleep($wait);
             }
             $todo = $retry;
@@ -305,18 +342,37 @@ class Client implements ClientInterface
     }
 
     /**
+     * The miss rebuilt with the rejection reason as repair note.
+     *
+     * @param ProviderInterface $provider
+     * @param array $item miss as {request, model, key, http, repaired}
+     * @param InvalidAnswerException $invalid
+     * @return array
+     * @throws RequestException
+     */
+    private function repair(ProviderInterface $provider, array $item, InvalidAnswerException $invalid): array
+    {
+        $item['http'] = $provider->buildRequest($item['request'], $item['model'], $invalid->getMessage());
+        $item['repaired'] = true;
+
+        return $item;
+    }
+
+    /**
      * Fail every key with CircuitOpen/RateLimit/BudgetExceeded when sending is not allowed; true when it refused.
      *
+     * @param string $label provider label
      * @param array[] $todo
      * @param array $results
      * @return bool
      */
-    private function refuseIfBlocked(array $todo, array &$results): bool
+    private function refuseIfBlocked(string $label, array $todo, array &$results): bool
     {
         if ($this->circuitBreaker->isOpen()) {
             foreach (array_keys($todo) as $index) {
                 $results[$index] = new CircuitOpenException(__(
-                    'TypeSafe calls are paused for up to %1 s after repeated failures.',
+                    '%1 calls are paused for up to %2 s after repeated failures.',
+                    $label,
                     CircuitBreaker::OPEN_SECONDS
                 ));
             }
@@ -326,7 +382,7 @@ class Client implements ClientInterface
         if ($pause > 0) {
             foreach (array_keys($todo) as $index) {
                 $results[$index] = new RateLimitException(
-                    __('TypeSafe rate limit reached; calls are paused for %1 s.', $pause),
+                    __('%1 rate limit reached; calls are paused for %2 s.', $label, $pause),
                     null,
                     429,
                     $pause
@@ -337,7 +393,7 @@ class Client implements ClientInterface
         if ($this->ledger->getRemainingBudget() === 0) {
             foreach (array_keys($todo) as $index) {
                 $results[$index] = new BudgetExceededException(
-                    __('TypeSafe monthly token budget (%1) is used up.', $this->config->getMonthlyTokenBudget())
+                    __('%1 monthly token budget (%2) is used up.', $label, $this->config->getMonthlyTokenBudget())
                 );
             }
             return true;
@@ -349,14 +405,15 @@ class Client implements ClientInterface
     /**
      * Seconds to wait before retrying a failed attempt, or null when the failure is final.
      *
+     * @param ProviderInterface $provider
      * @param HttpResponse $response
      * @param int $attempt
      * @return float|null
      */
-    private function retryDelay(HttpResponse $response, int $attempt): ?float
+    private function retryDelay(ProviderInterface $provider, HttpResponse $response, int $attempt): ?float
     {
         if (!$response->isTransportError() && $response->getStatus() === 429) {
-            $retryAfter = $this->backoff->parseRetryAfter($response->getHeader('retry-after'));
+            $retryAfter = $provider->retryAfter($response);
             if ($retryAfter === null) {
                 return $this->backoff->delay($attempt);
             }
@@ -383,19 +440,25 @@ class Client implements ClientInterface
     /**
      * One warning per failed attempt; never the API key, the body or the state.
      *
-     * @param array $item miss as {request, model, key, body}
+     * @param string $label provider label
+     * @param array $item miss as {request, model, key, http, repaired}
      * @param HttpResponse $response
      * @param int $attempt
      * @param int $maxAttempts
      * @return void
      */
-    private function logFailure(array $item, HttpResponse $response, int $attempt, int $maxAttempts): void
-    {
+    private function logFailure(
+        string $label,
+        array $item,
+        HttpResponse $response,
+        int $attempt,
+        int $maxAttempts
+    ): void {
         $reason = $response->isTransportError()
             ? ($response->getError() !== '' ? $response->getError() : 'no response')
             : 'HTTP ' . $response->getStatus();
         $this->logger->warning(
-            sprintf('TypeSafe request failed (attempt %d/%d): %s', $attempt, $maxAttempts, $reason),
+            sprintf('%s request failed (attempt %d/%d): %s', $label, $attempt, $maxAttempts, $reason),
             [
                 'consumer' => $item['request']->getConsumer(),
                 'model' => $item['model'],
@@ -405,46 +468,27 @@ class Client implements ClientInterface
     }
 
     /**
-     * Build the `POST /v1/systemone` request.
-     *
-     * @param string $body
-     * @param string $apiKey
-     * @return HttpRequest
-     */
-    private function httpRequest(string $body, #[\SensitiveParameter] string $apiKey): HttpRequest
-    {
-        return new HttpRequest(
-            'POST',
-            $this->config->getBaseUrl() . self::ENDPOINT,
-            [
-                'Authorization' => 'Bearer ' . $apiKey,
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-                'Expect' => '',
-            ],
-            $body,
-            $this->config->getTimeout()
-        );
-    }
-
-    /**
      * Parse a 2xx body, then cache it and record its tokens.
      *
-     * A malformed body is a final TransportException; its billed tokens are still recorded.
+     * A malformed body or invalid answer is returned as TransportException; its billed tokens are still recorded.
      *
-     * @param array $item miss as {request, model, key, body}
+     * @param ProviderInterface $provider
+     * @param array $item miss as {request, model, key, http, repaired}
      * @param HttpResponse $httpResponse
      * @return Response|TransportException
      */
-    private function succeed(array $item, HttpResponse $httpResponse): Response|TransportException
-    {
+    private function succeed(
+        ProviderInterface $provider,
+        array $item,
+        HttpResponse $httpResponse
+    ): Response|TransportException {
         $request = $item['request'];
+        $usage = $provider->usage($httpResponse->getBody());
         try {
-            $response = $this->parser->parse($httpResponse->getBody(), $request, false);
+            $response = $provider->parseResponse($httpResponse->getBody(), $request, $item['model'], false);
         } catch (TransportException $e) {
-            $tokens = $this->parser->billedTokens($httpResponse->getBody());
-            if ($tokens > 0) {
-                $this->ledger->record($request->getConsumer(), $tokens, false);
+            if ($usage['input'] + $usage['output'] > 0) {
+                $this->ledger->record($request->getConsumer(), $usage['input'], false, $usage['output']);
             }
             return $e;
         }
@@ -456,46 +500,54 @@ class Client implements ClientInterface
             $httpResponse->getBody(),
             $response->getInputTokens()
         );
-        $this->ledger->record($request->getConsumer(), $response->getInputTokens(), false);
+        $this->ledger->record($request->getConsumer(), $usage['input'], false, $usage['output']);
 
         return $response;
     }
 
     /**
-     * Map a non-2xx or transport-error response to its final exception.
+     * Map a non-2xx or transport-error response the provider did not classify to its final exception by status.
      *
+     * @param ProviderInterface $provider
      * @param HttpResponse $response
      * @return TypeSafeException
      */
-    private function fail(HttpResponse $response): TypeSafeException
+    private function fail(ProviderInterface $provider, HttpResponse $response): TypeSafeException
     {
+        $label = $provider->getLabel();
         $status = $response->getStatus();
         if ($response->isTransportError()) {
-            return new TransportException(
-                __('TypeSafe request failed: %1', $response->getError() !== '' ? $response->getError() : 'no response')
-            );
+            return new TransportException(__(
+                '%1 request failed: %2',
+                $label,
+                $response->getError() !== '' ? $response->getError() : 'no response'
+            ));
         }
         if ($status === 401 || $status === 403) {
-            return new AuthenticationException(__('TypeSafe rejected the API key (HTTP %1).', $status), null, $status);
+            return new AuthenticationException(
+                __('%1 rejected the API key (HTTP %2).', $label, $status),
+                null,
+                $status
+            );
         }
         if ($status === 429) {
-            $retryAfter = $this->backoff->parseRetryAfter($response->getHeader('retry-after'));
+            $retryAfter = $provider->retryAfter($response);
 
             return new RateLimitException(
                 $retryAfter !== null
-                    ? __('TypeSafe rate limit reached; retry after %1 s.', $retryAfter)
-                    : __('TypeSafe rate limit reached.'),
+                    ? __('%1 rate limit reached; retry after %2 s.', $label, $retryAfter)
+                    : __('%1 rate limit reached.', $label),
                 null,
                 $status,
                 $retryAfter
             );
         }
         if ($status === 408 || $status >= 500) {
-            return new TransportException(__('TypeSafe answered HTTP %1.', $status), null, $status);
+            return new TransportException(__('%1 answered HTTP %2.', $label, $status), null, $status);
         }
 
         return new RequestException(
-            __('TypeSafe rejected the request (HTTP %1): %2', $status, $this->errorDetail($response->getBody())),
+            __('%1 rejected the request (HTTP %2): %3', $label, $status, $this->errorDetail($response->getBody())),
             null,
             $status
         );

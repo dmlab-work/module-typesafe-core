@@ -1,0 +1,8 @@
+{
+    "type": "error",
+    "error": {
+        "type": "rate_limit_error",
+        "message": "This request would exceed the rate limit for your organization of 50 requests per minute. For details, refer to: https://docs.claude.com/en/api/rate-limits."
+    },
+    "request_id": "req_011CSHoF2wD9sQ7aYkP4tR1M"
+}

@@ -14,7 +14,7 @@
         <section id="dmlab_typesafe" translate="label" type="text" sortOrder="50"
                  showInDefault="1" showInWebsite="0" showInStore="0">
             <class>separator-top</class>
-            <label>TypeSafe</label>
+            <label>AI Client</label>
             <tab>dmlab</tab>
             <resource>DmLab_TypeSafeCore::config</resource>
             <group id="general" translate="label" type="text" sortOrder="10"
@@ -22,26 +22,82 @@
                 <label>General</label>
                 <field id="enabled" translate="label" type="select" sortOrder="10"
                        showInDefault="1" showInWebsite="0" showInStore="0">
-                    <label>Enable TypeSafe</label>
+                    <label>Enable</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="provider" translate="label comment" type="select" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Provider</label>
+                    <source_model>DmLab\TypeSafeCore\Model\Config\Source\Provider</source_model>
+                    <comment>Used by every DMLab AI module. Configure it in its group below.</comment>
+                </field>
+                <!-- Hidden: bin/magento config:set resolves backend models by structure path, not config_path. -->
+                <field id="api_key" type="obscure" sortOrder="90"
+                       showInDefault="0" showInWebsite="0" showInStore="0">
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                </field>
+                <field id="base_url" type="text" sortOrder="91"
+                       showInDefault="0" showInWebsite="0" showInStore="0">
+                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\BaseUrl</backend_model>
+                </field>
+            </group>
+            <group id="typesafe" translate="label" type="text" sortOrder="20"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>TypeSafe</label>
+                <field id="api_key" translate="label comment" type="obscure" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>API Key</label>
+                    <config_path>dmlab_typesafe/general/api_key</config_path>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment>Get a key at console.typesafe.ai.</comment>
+                </field>
+                <field id="model" translate="label comment" type="text" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Model</label>
+                    <config_path>dmlab_typesafe/general/model</config_path>
+                    <comment>Pin a versioned id (e.g. jev-1.13.0); aliases move.</comment>
+                </field>
+                <field id="base_url" translate="label comment" type="text" sortOrder="30"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Base URL</label>
+                    <config_path>dmlab_typesafe/general/base_url</config_path>
+                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\BaseUrl</backend_model>
+                    <validate>validate-url</validate>
+                    <comment>HTTPS only.</comment>
+                </field>
+                <field id="test_connection" translate="label comment" type="button" sortOrder="40"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Test Connection</label>
+                    <frontend_model>DmLab\TypeSafeCore\Block\Adminhtml\System\Config\TestConnectionButton</frontend_model>
+                    <comment>Tests the saved configuration; save changes first.</comment>
+                </field>
+            </group>
+            <group id="openai_compatible" translate="label comment" type="text" sortOrder="30"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>OpenAI-compatible</label>
+                <comment>OpenAI, Azure OpenAI, OpenRouter, Groq, Mistral, Ollama, vLLM: any Chat Completions endpoint with JSON Schema output.</comment>
+                <field id="base_url" translate="label comment" type="text" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Base URL</label>
+                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\OpenAiCompatibleBaseUrl</backend_model>
+                    <validate>validate-url</validate>
+                    <comment>Up to /v1, e.g. https://api.openai.com/v1 or http://localhost:11434/v1 (Ollama).</comment>
                 </field>
                 <field id="api_key" translate="label comment" type="obscure" sortOrder="20"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>API Key</label>
                     <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
-                    <comment>Get a key at console.typesafe.ai.</comment>
+                    <comment>Leave empty for self-hosted endpoints without auth.</comment>
                 </field>
-                <field id="model" translate="label comment" type="text" sortOrder="30"
+                <field id="model" translate="label" type="text" sortOrder="30"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Model</label>
-                    <comment>Pin a versioned id (e.g. jev-1.13.0); aliases move. Used by every TypeSafe consumer.</comment>
                 </field>
-                <field id="base_url" translate="label comment" type="text" sortOrder="40"
+                <field id="send_temperature" translate="label comment" type="select" sortOrder="40"
                        showInDefault="1" showInWebsite="0" showInStore="0">
-                    <label>Base URL</label>
-                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\BaseUrl</backend_model>
-                    <validate>validate-url</validate>
-                    <comment>HTTPS only.</comment>
+                    <label>Send Temperature</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <comment>Sends temperature 0. Turn on only for models that accept it (not OpenAI reasoning models).</comment>
                 </field>
                 <field id="test_connection" translate="label comment" type="button" sortOrder="50"
                        showInDefault="1" showInWebsite="0" showInStore="0">
@@ -50,9 +106,64 @@
                     <comment>Tests the saved configuration; save changes first.</comment>
                 </field>
             </group>
-            <group id="limits" translate="label" type="text" sortOrder="20"
+            <group id="anthropic" translate="label" type="text" sortOrder="40"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>Anthropic</label>
+                <field id="base_url" translate="label comment" type="text" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Base URL</label>
+                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\BaseUrl</backend_model>
+                    <validate>validate-url</validate>
+                    <comment>HTTPS only.</comment>
+                </field>
+                <field id="api_key" translate="label comment" type="obscure" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>API Key</label>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment>Get a key at platform.claude.com.</comment>
+                </field>
+                <field id="model" translate="label" type="text" sortOrder="30"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Model</label>
+                </field>
+                <field id="test_connection" translate="label comment" type="button" sortOrder="40"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Test Connection</label>
+                    <frontend_model>DmLab\TypeSafeCore\Block\Adminhtml\System\Config\TestConnectionButton</frontend_model>
+                    <comment>Tests the saved configuration; save changes first.</comment>
+                </field>
+            </group>
+            <group id="gemini" translate="label" type="text" sortOrder="50"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>Gemini</label>
+                <field id="base_url" translate="label comment" type="text" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Base URL</label>
+                    <backend_model>DmLab\TypeSafeCore\Model\Config\Backend\BaseUrl</backend_model>
+                    <validate>validate-url</validate>
+                    <comment>HTTPS only.</comment>
+                </field>
+                <field id="api_key" translate="label comment" type="obscure" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>API Key</label>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment>Get a key at aistudio.google.com.</comment>
+                </field>
+                <field id="model" translate="label" type="text" sortOrder="30"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Model</label>
+                </field>
+                <field id="test_connection" translate="label comment" type="button" sortOrder="40"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Test Connection</label>
+                    <frontend_model>DmLab\TypeSafeCore\Block\Adminhtml\System\Config\TestConnectionButton</frontend_model>
+                    <comment>Tests the saved configuration; save changes first.</comment>
+                </field>
+            </group>
+            <group id="limits" translate="label comment" type="text" sortOrder="60"
                    showInDefault="1" showInWebsite="0" showInStore="0">
                 <label>Limits</label>
+                <comment>Apply to every provider.</comment>
                 <field id="timeout" translate="label comment" type="text" sortOrder="10"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Timeout</label>
@@ -75,7 +186,7 @@
                     <label>Monthly Token Budget</label>
                     <frontend_model>DmLab\TypeSafeCore\Block\Adminhtml\System\Config\BudgetUsage</frontend_model>
                     <validate>validate-digits</validate>
-                    <comment>0 = unlimited (about $0.042 per 1M input tokens).</comment>
+                    <comment>0 = unlimited. Counts input + output tokens.</comment>
                 </field>
                 <field id="cache_ttl_days" translate="label comment" type="text" sortOrder="50"
                        showInDefault="1" showInWebsite="0" showInStore="0">

@@ -1,0 +1,15 @@
+{
+    "id": "msg_01Hk3sYp7QeWv2nTzR8bLm4A",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-5-5-20261015",
+    "content": [
+        {"type": "thinking", "thinking": "{\"q1\":{\"answer\":true,\"confidence\":1}} looks wrong, grey is not red.", "signature": "EqQBCgIYAhIM1gbcDa9GJwZA2b3hGgxBdjrkzLoky3dl1pkiMOYds"},
+        {"type": "redacted_thinking", "data": "EmwKAhgBEgy3va3pzix/LafPsn4aDFIT2Xlxh0L5L8rLVyIwxtE3rAFBa8cr3qpP"},
+        {"type": "text", "text": "{\"q1\":{\"answer\":false,\"confidence\":0.9},"},
+        {"type": "text", "text": "\"q2\":{\"choice\":\"wool\",\"confidence\":0.8},\"q3\":{\"score\":2,\"confidence\":0.7}}"}
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 400, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 96}
+}

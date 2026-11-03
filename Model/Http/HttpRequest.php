@@ -9,6 +9,8 @@ namespace DmLab\TypeSafeCore\Model\Http;
 
 /**
  * Immutable outgoing HTTP request.
+ *
+ * @api
  */
 class HttpRequest
 {

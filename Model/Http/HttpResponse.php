@@ -9,6 +9,8 @@ namespace DmLab\TypeSafeCore\Model\Http;
 
 /**
  * Immutable HTTP result; status 0 means no response was received.
+ *
+ * @api
  */
 class HttpResponse
 {

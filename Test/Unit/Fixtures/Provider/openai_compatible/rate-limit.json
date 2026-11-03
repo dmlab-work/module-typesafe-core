@@ -1,0 +1,8 @@
+{
+    "error": {
+        "message": "Rate limit reached for gpt-6-luna in organization org-abc123 on requests per min (RPM): Limit 500, Used 500, Requested 1. Please try again in 7s.",
+        "type": "requests",
+        "param": null,
+        "code": "rate_limit_exceeded"
+    }
+}

@@ -8,28 +8,28 @@ declare(strict_types=1);
 namespace DmLab\TypeSafeCore\Api;
 
 /**
- * Shared TypeSafe settings for consumers. Never exposes the API key.
+ * Shared AI client settings for consumers. Never exposes an API key.
  *
  * @api
  */
 interface ConfigInterface
 {
     /**
-     * Whether TypeSafe is enabled.
+     * Whether the AI client is enabled.
      *
      * @return bool
      */
     public function isEnabled(): bool;
 
     /**
-     * Whether TypeSafe is enabled and has a non-empty API key.
+     * Whether the client is enabled and the active provider has its required settings.
      *
      * @return bool
      */
     public function isConfigured(): bool;
 
     /**
-     * Configured pinned model id, default 'jev-1.13.0'.
+     * Model id of the active provider (TypeSafe default 'jev-1.13.0').
      *
      * @return string
      */

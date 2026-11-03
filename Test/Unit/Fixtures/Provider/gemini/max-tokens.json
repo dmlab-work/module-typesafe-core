@@ -1,0 +1,15 @@
+{
+    "candidates": [
+        {
+            "content": {
+                "parts": [{"text": "{\"q1\":{\"answer\":false,\"confidence\":0.9},\"q2\":{\"choi"}],
+                "role": "model"
+            },
+            "finishReason": "MAX_TOKENS",
+            "index": 0
+        }
+    ],
+    "usageMetadata": {"promptTokenCount": 400, "candidatesTokenCount": 16000, "totalTokenCount": 16400},
+    "modelVersion": "gemini-3.5-flash-lite-001",
+    "responseId": "b7ULaZunJ3qJ1Q2TudDF6Uk"
+}

@@ -55,7 +55,8 @@ class CommandRegistrationTest extends TestCase
         $this->assertSame(
             [
                 'config' => 'DmLab\TypeSafeCore\Model\Config\Proxy',
-                'modelLister' => 'DmLab\TypeSafeCore\Model\Connection\ModelLister\Proxy',
+                'providerPool' => 'DmLab\TypeSafeCore\Model\Provider\ProviderPool\Proxy',
+                'providerSettings' => 'DmLab\TypeSafeCore\Model\Provider\ProviderSettings\Proxy',
             ],
             $this->objectArguments(PingCommand::class)
         );
@@ -63,6 +64,7 @@ class CommandRegistrationTest extends TestCase
             [
                 'usageLedger' => 'DmLab\TypeSafeCore\Model\Usage\UsageLedger\Proxy',
                 'config' => 'DmLab\TypeSafeCore\Model\Config\Proxy',
+                'providerPool' => 'DmLab\TypeSafeCore\Model\Provider\ProviderPool\Proxy',
             ],
             $this->objectArguments(UsageCommand::class)
         );

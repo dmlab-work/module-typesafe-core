@@ -1,0 +1,15 @@
+{
+    "candidates": [
+        {
+            "content": {"role": "model"},
+            "finishReason": "SAFETY",
+            "index": 0,
+            "safetyRatings": [
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "probability": "HIGH", "blocked": true}
+            ]
+        }
+    ],
+    "usageMetadata": {"promptTokenCount": 400, "totalTokenCount": 400},
+    "modelVersion": "gemini-3.5-flash-lite-001",
+    "responseId": "a6TKaZtmI2pI0P1StcCE5Tj"
+}

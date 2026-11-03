@@ -51,4 +51,11 @@ class HttpMessageTest extends TestCase
         $this->assertSame(7, (new HttpResponse(0, [], '', 7, 'refused'))->getErrno());
         $this->assertSame('refused', (new HttpResponse(0, [], '', 7, 'refused'))->getError());
     }
+
+    public function testMessagesArePublicApiOfTheProviderContract(): void
+    {
+        foreach ([HttpRequest::class, HttpResponse::class] as $class) {
+            self::assertStringContainsString('@api', (string)(new \ReflectionClass($class))->getDocComment());
+        }
+    }
 }

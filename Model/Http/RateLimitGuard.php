@@ -41,7 +41,7 @@ class RateLimitGuard
         try {
             $until = $this->cache->load(self::UNTIL_KEY);
         } catch (\Exception $e) {
-            $this->logger->warning('TypeSafe rate limit read failed: ' . $e->getMessage());
+            $this->logger->warning('AI client rate limit read failed: ' . $e->getMessage());
             return 0;
         }
         if (!is_numeric($until)) {
@@ -63,9 +63,9 @@ class RateLimitGuard
         try {
             $until = $this->clock->now() + $seconds;
             $this->cache->save(sprintf('%.3F', $until), self::UNTIL_KEY, [], $seconds);
-            $this->logger->warning(sprintf('TypeSafe rate limit reached; calls paused for %d s.', $seconds));
+            $this->logger->warning(sprintf('AI client rate limit reached; calls paused for %d s.', $seconds));
         } catch (\Exception $e) {
-            $this->logger->warning('TypeSafe rate limit write failed: ' . $e->getMessage());
+            $this->logger->warning('AI client rate limit write failed: ' . $e->getMessage());
         }
     }
 }

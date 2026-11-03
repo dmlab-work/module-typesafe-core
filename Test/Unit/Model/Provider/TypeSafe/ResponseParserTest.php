@@ -5,9 +5,8 @@
  */
 declare(strict_types=1);
 
-namespace DmLab\TypeSafeCore\Test\Unit\Model;
+namespace DmLab\TypeSafeCore\Test\Unit\Model\Provider\TypeSafe;
 
-use DmLab\TypeSafeCore\Api\ConfigInterface;
 use DmLab\TypeSafeCore\Api\Data\Answer\ChoiceAnswer;
 use DmLab\TypeSafeCore\Api\Data\Answer\NoulAnswer;
 use DmLab\TypeSafeCore\Api\Data\Answer\ScoreAnswer;
@@ -16,7 +15,7 @@ use DmLab\TypeSafeCore\Api\Data\Question\NoulQuestion;
 use DmLab\TypeSafeCore\Api\Data\Question\ScoreQuestion;
 use DmLab\TypeSafeCore\Api\Data\Request;
 use DmLab\TypeSafeCore\Exception\TransportException;
-use DmLab\TypeSafeCore\Model\ResponseParser;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\ResponseParser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -43,9 +42,7 @@ JSON;
 
     protected function setUp(): void
     {
-        $config = $this->createStub(ConfigInterface::class);
-        $config->method('getModel')->willReturn('jev-config');
-        $this->parser = new ResponseParser($config);
+        $this->parser = new ResponseParser();
     }
 
     private function request(?string $model = null): Request
@@ -59,7 +56,7 @@ JSON;
 
     public function testParsesEveryAnswerType(): void
     {
-        $response = $this->parser->parse(self::C1_BODY, $this->request(), false);
+        $response = $this->parser->parse(self::C1_BODY, $this->request(), 'jev-resolved', false);
 
         $noul = $response->getAnswer('red');
         self::assertInstanceOf(NoulAnswer::class, $noul);
@@ -82,7 +79,7 @@ JSON;
 
     public function testModelAndUsageExtracted(): void
     {
-        $response = $this->parser->parse(self::C1_BODY, $this->request(), false);
+        $response = $this->parser->parse(self::C1_BODY, $this->request(), 'jev-resolved', false);
 
         self::assertSame('jev-1.13.0', $response->getModel());
         self::assertSame(1234, $response->getInputTokens());
@@ -106,30 +103,31 @@ JSON;
     {
         $body = str_replace('"input_tokens": 1234', '"input_tokens": ' . $tokens, self::C1_BODY);
 
-        self::assertSame($expected, $this->parser->parse($body, $this->request(), false)->getInputTokens());
+        self::assertSame(
+            $expected,
+            $this->parser->parse($body, $this->request(), 'jev-resolved', false)->getInputTokens()
+        );
     }
 
     public function testCachedReportsZeroTokens(): void
     {
-        $response = $this->parser->parse(self::C1_BODY, $this->request(), true);
+        $response = $this->parser->parse(self::C1_BODY, $this->request(), 'jev-resolved', true);
 
         self::assertTrue($response->isCached());
         self::assertSame(0, $response->getInputTokens());
         self::assertSame('jev-1.13.0', $response->getModel());
     }
 
-    public function testMissingModelFallsBackToRequestThenConfig(): void
+    public function testMissingModelFallsBackToTheResolvedModel(): void
     {
         $body = '{"answers":{"q":{"type":"noul","noul":1}}}';
-        $question = ['q' => new NoulQuestion('Q')];
+        $request = new Request('s', ['q' => new NoulQuestion('Q')], 'c');
 
-        $override = $this->parser->parse($body, new Request('s', $question, 'c', 'jev-1.14.0'), false);
-        $default = $this->parser->parse($body, new Request('s', $question, 'c'), false);
+        $response = $this->parser->parse($body, $request, 'jev-1.14.0', false);
 
-        self::assertSame('jev-1.14.0', $override->getModel());
-        self::assertSame('jev-config', $default->getModel());
-        self::assertSame(0, $default->getInputTokens());
-        self::assertSame(1.0, $default->getAnswer('q')->getProbability());
+        self::assertSame('jev-1.14.0', $response->getModel());
+        self::assertSame(0, $response->getInputTokens());
+        self::assertSame(1.0, $response->getAnswer('q')->getProbability());
     }
 
     public function testNumericStringOptionsAndIds(): void
@@ -138,7 +136,7 @@ JSON;
         $body = '{"model":"m","answers":{"0":{"type":"choice","choice":"1",'
             . '"probabilities":{"0":0.3,"1":"0.7"},"confidence":1}}}';
 
-        $answer = $this->parser->parse($body, $request, false)->getAnswer('0');
+        $answer = $this->parser->parse($body, $request, 'jev-resolved', false)->getAnswer('0');
 
         self::assertInstanceOf(ChoiceAnswer::class, $answer);
         self::assertSame('1', $answer->getChoice());
@@ -151,7 +149,7 @@ JSON;
     {
         $request = new Request('s', ['red' => new NoulQuestion('Is it red?')], 'c');
 
-        $response = $this->parser->parse(self::C1_BODY, $request, false);
+        $response = $this->parser->parse(self::C1_BODY, $request, 'jev-resolved', false);
 
         self::assertSame(['red'], array_keys($response->getAnswers()));
     }
@@ -211,7 +209,7 @@ JSON;
     public function testMalformedBodies(string $body, string $detail): void
     {
         try {
-            $this->parser->parse($body, $this->request(), false);
+            $this->parser->parse($body, $this->request(), 'jev-resolved', false);
             self::fail('TransportException expected.');
         } catch (TransportException $e) {
             self::assertStringStartsWith('TypeSafe returned a malformed response: ', $e->getMessage());
@@ -222,7 +220,7 @@ JSON;
     public function testInvalidJsonKeepsCause(): void
     {
         try {
-            $this->parser->parse('not json', $this->request(), false);
+            $this->parser->parse('not json', $this->request(), 'jev-resolved', false);
             self::fail('TransportException expected.');
         } catch (TransportException $e) {
             self::assertInstanceOf(\JsonException::class, $e->getPrevious());

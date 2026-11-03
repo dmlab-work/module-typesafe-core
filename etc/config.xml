@@ -11,10 +11,27 @@
         <dmlab_typesafe>
             <general>
                 <enabled>0</enabled>
+                <provider>typesafe</provider>
                 <api_key backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
                 <model>jev-1.13.0</model>
                 <base_url>https://api.typesafe.ai</base_url>
             </general>
+            <openai_compatible>
+                <base_url>https://api.openai.com/v1</base_url>
+                <api_key backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
+                <model>gpt-6-luna</model>
+                <send_temperature>0</send_temperature>
+            </openai_compatible>
+            <anthropic>
+                <base_url>https://api.anthropic.com</base_url>
+                <api_key backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
+                <model>claude-haiku-5-5</model>
+            </anthropic>
+            <gemini>
+                <base_url>https://generativelanguage.googleapis.com</base_url>
+                <api_key backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
+                <model>gemini-3.5-flash-lite</model>
+            </gemini>
             <limits>
                 <timeout>20</timeout>
                 <concurrency>4</concurrency>

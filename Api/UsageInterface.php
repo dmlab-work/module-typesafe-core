@@ -8,14 +8,14 @@ declare(strict_types=1);
 namespace DmLab\TypeSafeCore\Api;
 
 /**
- * TypeSafe token usage for the current UTC month.
+ * AI token usage for the current UTC month.
  *
  * @api
  */
 interface UsageInterface
 {
     /**
-     * Input tokens spent this month, by one consumer or all of them.
+     * Billed tokens (input + output) spent this month, by one consumer or all of them.
      *
      * @param string|null $consumer
      * @return int
@@ -23,7 +23,7 @@ interface UsageInterface
     public function getMonthTokens(?string $consumer = null): int;
 
     /**
-     * Tokens left in the monthly budget; null = unlimited.
+     * Billed tokens (input + output) left in the monthly budget; null = unlimited.
      *
      * @return int|null
      */

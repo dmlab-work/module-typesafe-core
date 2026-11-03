@@ -1,6 +1,6 @@
 {
     "name": "dmlab/module-typesafe-core",
-    "description": "TypeSafe (Jev) AI client for Magento 2: shared connection with your own encrypted API key, response cache, monthly token budget, retries and rate limiting.",
+    "description": "AI client for Magento 2 with TypeSafe (Jev), OpenAI-compatible (OpenAI, Azure OpenAI, Ollama, vLLM), Anthropic Claude and Google Gemini providers: shared connection with your own encrypted API key, response cache, monthly token budget, retries and rate limiting.",
     "keywords": [
         "magento2",
         "magento2-module",
@@ -11,6 +11,12 @@
         "api client",
         "typesafe",
         "jev",
+        "openai",
+        "anthropic",
+        "claude",
+        "gemini",
+        "azure openai",
+        "ollama",
         "catalog enrichment",
         "ai integration",
         "token budget"
@@ -18,7 +24,7 @@
     "homepage": "https://github.com/dmlab-work/module-typesafe-core",
     "type": "magento2-module",
     "license": "OSL-3.0",
-    "version": "0.0.2",
+    "version": "0.1.0",
     "support": {
         "issues": "https://github.com/dmlab-work/module-typesafe-core/issues",
         "source": "https://github.com/dmlab-work/module-typesafe-core"

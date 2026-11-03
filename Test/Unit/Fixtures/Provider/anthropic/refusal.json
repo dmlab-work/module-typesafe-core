@@ -1,0 +1,10 @@
+{
+    "id": "msg_01Df9pAv4TyZe7xNrM1uLf5G",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-5-5-20261015",
+    "content": [],
+    "stop_reason": "refusal",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 400, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 11}
+}

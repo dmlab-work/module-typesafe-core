@@ -1,0 +1,20 @@
+{
+    "id": "chatcmpl-Cx81dS4x9oP2cM6uVb1rNfG5",
+    "object": "chat.completion",
+    "created": 1793520002,
+    "model": "gpt-6-luna-2026-09-15",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "refusal": "I'm sorry, I can't help with that request.",
+                "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+        }
+    ],
+    "usage": {"prompt_tokens": 412, "completion_tokens": 11, "total_tokens": 423}
+}

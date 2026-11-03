@@ -11,7 +11,7 @@ use Magento\Config\Block\System\Config\Form\Field;
 use Magento\Framework\Data\Form\Element\AbstractElement;
 
 /**
- * "Test Connection" button for the TypeSafe config section.
+ * "Test Connection" button of a provider group; the group id is the provider code.
  */
 class TestConnectionButton extends Field
 {
@@ -26,6 +26,7 @@ class TestConnectionButton extends Field
 
         return '<button type="button" class="action-default" data-mage-init="' . $init . '"'
             . ' data-test-url="' . $this->_escaper->escapeHtmlAttr($this->getUrl(self::TEST_ROUTE)) . '"'
+            . ' data-provider="' . $this->_escaper->escapeHtmlAttr($this->getProviderCode($element)) . '"'
             . ' data-form-key="' . $this->_escaper->escapeHtmlAttr((string)$this->getFormKey()) . '">'
             . $this->_escaper->escapeHtml((string)__('Test Connection')) . '</button>'
             . '<div class="dmlab-typesafe-test-result message" style="display:none"></div>';
@@ -37,5 +38,19 @@ class TestConnectionButton extends Field
     protected function _renderScopeLabel(AbstractElement $element)
     {
         return '';
+    }
+
+    /**
+     * Group id of the field: its `field_config` path is `<section>/<group>`.
+     *
+     * @param AbstractElement $element
+     * @return string
+     */
+    private function getProviderCode(AbstractElement $element): string
+    {
+        $field = $element->getData('field_config');
+        $path = is_array($field) && is_string($field['path'] ?? null) ? $field['path'] : '';
+
+        return explode('/', $path)[1] ?? '';
     }
 }

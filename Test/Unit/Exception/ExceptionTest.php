@@ -10,6 +10,7 @@ namespace DmLab\TypeSafeCore\Test\Unit\Exception;
 use DmLab\TypeSafeCore\Exception\AuthenticationException;
 use DmLab\TypeSafeCore\Exception\BudgetExceededException;
 use DmLab\TypeSafeCore\Exception\CircuitOpenException;
+use DmLab\TypeSafeCore\Exception\InvalidAnswerException;
 use DmLab\TypeSafeCore\Exception\NotConfiguredException;
 use DmLab\TypeSafeCore\Exception\RateLimitException;
 use DmLab\TypeSafeCore\Exception\RequestException;
@@ -36,6 +37,7 @@ class ExceptionTest extends TestCase
             'circuit' => [CircuitOpenException::class],
             'request' => [RequestException::class],
             'transport' => [TransportException::class],
+            'invalid answer' => [InvalidAnswerException::class],
         ];
     }
 
@@ -76,5 +78,10 @@ class ExceptionTest extends TestCase
     public function testRateLimitRetryAfterDefaultsToNull(): void
     {
         self::assertNull((new RateLimitException(new Phrase('TypeSafe rate limit reached.')))->getRetryAfter());
+    }
+
+    public function testInvalidAnswerIsATransportFailure(): void
+    {
+        self::assertInstanceOf(TransportException::class, new InvalidAnswerException(new Phrase('bad answer')));
     }
 }

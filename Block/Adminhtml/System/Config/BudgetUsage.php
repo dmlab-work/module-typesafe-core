@@ -8,6 +8,8 @@ declare(strict_types=1);
 namespace DmLab\TypeSafeCore\Block\Adminhtml\System\Config;
 
 use DmLab\TypeSafeCore\Api\UsageInterface;
+use DmLab\TypeSafeCore\Model\Config;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\TypeSafeProvider;
 use DmLab\TypeSafeCore\Model\Usage\UsageLedger;
 use Magento\Backend\Block\Template\Context;
 use Magento\Config\Block\System\Config\Form\Field;
@@ -15,19 +17,21 @@ use Magento\Framework\Data\Form\Element\AbstractElement;
 use Magento\Framework\View\Helper\SecureHtmlRenderer;
 
 /**
- * Monthly Token Budget field with this month's usage, cost and remaining budget below it.
+ * Monthly Token Budget field with this month's usage, TypeSafe cost and remaining budget below it.
  */
 class BudgetUsage extends Field
 {
     /**
      * @param Context $context
      * @param UsageInterface $usage
+     * @param Config $config
      * @param array $data
      * @param SecureHtmlRenderer|null $secureRenderer
      */
     public function __construct(
         Context $context,
         private readonly UsageInterface $usage,
+        private readonly Config $config,
         array $data = [],
         ?SecureHtmlRenderer $secureRenderer = null
     ) {
@@ -55,11 +59,21 @@ class BudgetUsage extends Field
         try {
             $used = $this->usage->getMonthTokens();
             $remaining = $this->usage->getRemainingBudget();
+            $typeSafe = $this->config->getProvider() === TypeSafeProvider::CODE;
         } catch (\Exception $e) {
             $this->_logger->warning('TypeSafe usage read failed: ' . $e->getMessage());
             return (string)__('Usage this month is unavailable.');
         }
 
+        if (!$typeSafe) {
+            return $remaining === null
+                ? (string)__('Used this month: %1 tokens. Remaining: unlimited', number_format($used))
+                : (string)__(
+                    'Used this month: %1 tokens. Remaining: %2 tokens',
+                    number_format($used),
+                    number_format($remaining)
+                );
+        }
         $cost = sprintf('%.4f', $used * UsageLedger::USD_PER_MILLION_TOKENS / 1000000);
 
         return $remaining === null

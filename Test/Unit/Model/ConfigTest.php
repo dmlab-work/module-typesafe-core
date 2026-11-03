@@ -9,6 +9,9 @@ namespace DmLab\TypeSafeCore\Test\Unit\Model;
 
 use DmLab\TypeSafeCore\Api\ConfigInterface;
 use DmLab\TypeSafeCore\Model\Config;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
+use DmLab\TypeSafeCore\Model\Provider\ProviderSettings;
+use DmLab\TypeSafeCore\Test\Unit\Fake\FakeProvider;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -26,7 +29,14 @@ class ConfigTest extends TestCase
         $scopeConfig->method('isSetFlag')
             ->willReturnCallback(static fn (string $path) => (bool)($values[$path] ?? false));
 
-        return new Config($scopeConfig);
+        $settings = new ProviderSettings($scopeConfig);
+        $pool = new ProviderPool($settings, [
+            'typesafe' => new FakeProvider('typesafe', $settings),
+            'openai_compatible' => new FakeProvider('openai_compatible', $settings, false),
+            'anthropic' => new FakeProvider('anthropic', $settings),
+        ]);
+
+        return new Config($scopeConfig, $settings, $pool);
     }
 
     public function testImplementsConfigInterface(): void
@@ -148,5 +158,67 @@ class ConfigTest extends TestCase
 
         self::assertTrue($config->isEnabled());
         self::assertTrue($config->isConfigured());
+    }
+
+    public function testProviderDefaultsToTypeSafe(): void
+    {
+        self::assertSame('typesafe', $this->config([])->getProvider());
+        $config = $this->config([ProviderSettings::XML_PATH_PROVIDER => 'anthropic']);
+        self::assertSame('anthropic', $config->getProvider());
+    }
+
+    public function testModelAndConfiguredFollowTheActiveProvider(): void
+    {
+        $values = [
+            Config::XML_PATH_ENABLED => '1',
+            Config::XML_PATH_API_KEY => 'ts-key',
+            ProviderSettings::XML_PATH_PROVIDER => 'anthropic',
+        ];
+
+        $config = $this->config($values);
+        self::assertSame('claude-haiku-5-5', $config->getModel());
+        self::assertFalse($config->isConfigured(), 'The TypeSafe key does not configure Anthropic.');
+
+        $config = $this->config($values + [
+            'dmlab_typesafe/anthropic/api_key' => 'sk-ant',
+            'dmlab_typesafe/anthropic/model' => 'claude-sonnet-5-5',
+        ]);
+        self::assertSame('claude-sonnet-5-5', $config->getModel());
+        self::assertTrue($config->isConfigured());
+        self::assertSame('ts-key', $config->getApiKey(), 'getApiKey() stays the TypeSafe accessor.');
+        self::assertSame('https://api.typesafe.ai', $config->getBaseUrl());
+    }
+
+    public function testKeylessProviderIsConfiguredByItsBaseUrl(): void
+    {
+        $config = $this->config([
+            Config::XML_PATH_ENABLED => '1',
+            ProviderSettings::XML_PATH_PROVIDER => 'openai_compatible',
+        ]);
+
+        self::assertTrue($config->isConfigured());
+        self::assertSame('gpt-6-luna', $config->getModel());
+    }
+
+    public function testActiveProviderStillNeedsTheModuleEnabled(): void
+    {
+        $config = $this->config([
+            ProviderSettings::XML_PATH_PROVIDER => 'anthropic',
+            'dmlab_typesafe/anthropic/api_key' => 'sk-ant',
+        ]);
+
+        self::assertFalse($config->isConfigured());
+    }
+
+    public function testUnregisteredProviderIsNotConfigured(): void
+    {
+        $config = $this->config([
+            Config::XML_PATH_ENABLED => '1',
+            ProviderSettings::XML_PATH_PROVIDER => 'gemini',
+            'dmlab_typesafe/gemini/api_key' => 'g-key',
+        ]);
+
+        self::assertFalse($config->isConfigured());
+        self::assertSame('gemini-3.5-flash-lite', $config->getModel());
     }
 }

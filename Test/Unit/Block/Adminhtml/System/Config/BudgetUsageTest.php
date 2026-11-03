@@ -9,6 +9,7 @@ namespace DmLab\TypeSafeCore\Test\Unit\Block\Adminhtml\System\Config;
 
 use DmLab\TypeSafeCore\Api\UsageInterface;
 use DmLab\TypeSafeCore\Block\Adminhtml\System\Config\BudgetUsage;
+use DmLab\TypeSafeCore\Model\Config;
 use Magento\Backend\Block\Template\Context;
 use Magento\Framework\App\ObjectManager;
 use Magento\Framework\Data\Form\Element\AbstractElement;
@@ -25,6 +26,9 @@ class BudgetUsageTest extends TestCase
 
     /** @var string[] */
     private array $warnings = [];
+
+    /** @var string active provider code */
+    private string $provider = 'typesafe';
 
     protected function setUp(): void
     {
@@ -67,7 +71,10 @@ class BudgetUsageTest extends TestCase
         $element = $this->createStub(AbstractElement::class);
         $element->method('getElementHtml')->willReturn('<input id="budget"/>');
 
-        $block = new BudgetUsage($context, $usage, [], $this->createStub(SecureHtmlRenderer::class));
+        $config = $this->createStub(Config::class);
+        $config->method('getProvider')->willReturnCallback(fn () => $this->provider);
+
+        $block = new BudgetUsage($context, $usage, $config, [], $this->createStub(SecureHtmlRenderer::class));
 
         return (new \ReflectionMethod($block, '_getElementHtml'))->invoke($block, $element);
     }
@@ -87,6 +94,28 @@ class BudgetUsageTest extends TestCase
             '<span>Used this month: 0 tokens (≈ $0.0000). Remaining: unlimited</span>',
             $this->html(0)
         );
+    }
+
+    public function testOtherProviderShowsNoCost(): void
+    {
+        $this->provider = 'gemini';
+
+        $this->assertStringContainsString(
+            '<span>Used this month: 2,500,000 tokens. Remaining: 7,500,000 tokens</span>',
+            $this->html(2500000, 7500000)
+        );
+        $this->assertStringContainsString(
+            '<span>Used this month: 12 tokens. Remaining: unlimited</span>',
+            $this->html(12)
+        );
+    }
+
+    public function testBudgetCommentQuotesNoPrice(): void
+    {
+        $xml = simplexml_load_file(dirname(__DIR__, 6) . '/etc/adminhtml/system.xml');
+        $comment = (string)$xml->xpath('//field[@id="monthly_token_budget"]/comment')[0];
+
+        $this->assertSame('0 = unlimited. Counts input + output tokens.', $comment);
     }
 
     public function testReadFailureIsLoggedAndShownAsUnavailable(): void

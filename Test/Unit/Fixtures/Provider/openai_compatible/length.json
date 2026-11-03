@@ -1,0 +1,20 @@
+{
+    "id": "chatcmpl-Cx81eT5y0pQ3dN7vWc2sOgH6",
+    "object": "chat.completion",
+    "created": 1793520003,
+    "model": "gpt-6-luna-2026-09-15",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "{\"q1\":{\"answer\":false,\"confidence\":0.9},\"q2\":{\"choi",
+                "refusal": null,
+                "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "length"
+        }
+    ],
+    "usage": {"prompt_tokens": 412, "completion_tokens": 16000, "total_tokens": 16412}
+}

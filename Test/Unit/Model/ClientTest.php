@@ -11,27 +11,36 @@ use DmLab\TypeSafeCore\Api\ClientInterface;
 use DmLab\TypeSafeCore\Api\Data\Question\NoulQuestion;
 use DmLab\TypeSafeCore\Api\Data\Request;
 use DmLab\TypeSafeCore\Api\Data\Response;
+use DmLab\TypeSafeCore\Api\ProviderInterface;
 use DmLab\TypeSafeCore\Exception\AuthenticationException;
 use DmLab\TypeSafeCore\Exception\BudgetExceededException;
 use DmLab\TypeSafeCore\Exception\CircuitOpenException;
+use DmLab\TypeSafeCore\Exception\InvalidAnswerException;
 use DmLab\TypeSafeCore\Exception\NotConfiguredException;
 use DmLab\TypeSafeCore\Exception\RateLimitException;
 use DmLab\TypeSafeCore\Exception\RequestException;
 use DmLab\TypeSafeCore\Exception\TransportException;
+use DmLab\TypeSafeCore\Exception\TypeSafeException;
 use DmLab\TypeSafeCore\Model\Cache\ResponseCache;
 use DmLab\TypeSafeCore\Model\Client;
 use DmLab\TypeSafeCore\Model\Config;
 use DmLab\TypeSafeCore\Model\Http\Backoff;
 use DmLab\TypeSafeCore\Model\Http\CircuitBreaker;
+use DmLab\TypeSafeCore\Model\Http\HttpRequest;
 use DmLab\TypeSafeCore\Model\Http\HttpResponse;
 use DmLab\TypeSafeCore\Model\Http\RateLimitGuard;
 use DmLab\TypeSafeCore\Model\Json\CanonicalJson;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
+use DmLab\TypeSafeCore\Model\Provider\ProviderSettings;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\ResponseParser;
+use DmLab\TypeSafeCore\Model\Provider\TypeSafe\TypeSafeProvider;
 use DmLab\TypeSafeCore\Model\RequestEncoder;
-use DmLab\TypeSafeCore\Model\ResponseParser;
 use DmLab\TypeSafeCore\Model\Usage\UsageLedger;
 use DmLab\TypeSafeCore\Test\Unit\Fake\ArrayCache;
 use DmLab\TypeSafeCore\Test\Unit\Fake\FakeClock;
+use DmLab\TypeSafeCore\Test\Unit\Fake\FakeLlmProvider;
 use DmLab\TypeSafeCore\Test\Unit\Fake\FakeTransport;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -45,6 +54,9 @@ class ClientTest extends TestCase
 
     /** @var string */
     private string $apiKey = self::API_KEY;
+
+    /** @var string|null `dmlab_typesafe/general/provider` */
+    private ?string $providerCode = null;
 
     /** @var int */
     private int $concurrency = 4;
@@ -64,7 +76,7 @@ class ClientTest extends TestCase
     /** @var array<int, array> */
     private array $saved = [];
 
-    /** @var array<int, array> */
+    /** @var array<int, array{string, int, bool, int}> consumer, input tokens, cache hit, output tokens */
     private array $ledgerRecords = [];
 
     /** @var array<int, array{string, string, array}> level, message, context */
@@ -75,6 +87,12 @@ class ClientTest extends TestCase
 
     /** @var RequestEncoder */
     private RequestEncoder $encoder;
+
+    /** @var ProviderSettings */
+    private ProviderSettings $settings;
+
+    /** @var TypeSafeProvider */
+    private TypeSafeProvider $provider;
 
     /** @var ArrayCache */
     private ArrayCache $circuitCache;
@@ -89,22 +107,29 @@ class ClientTest extends TestCase
     {
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturnCallback(fn () => $this->enabled);
-        $config->method('getApiKey')->willReturnCallback(fn () => $this->apiKey);
         $config->method('getModel')->willReturn('jev-1.13.0');
-        $config->method('getBaseUrl')->willReturn(self::BASE_URL);
-        $config->method('getTimeout')->willReturn(20);
         $config->method('getConcurrency')->willReturnCallback(fn () => $this->concurrency);
         $config->method('getMaxAttempts')->willReturnCallback(fn () => $this->maxAttempts);
         $config->method('getMonthlyTokenBudget')->willReturn(1000);
         $this->config = $config;
 
+        $scopeConfig = $this->createStub(ScopeConfigInterface::class);
+        $scopeConfig->method('getValue')->willReturnCallback(fn (string $path) => match ($path) {
+            Config::XML_PATH_API_KEY => $this->apiKey,
+            Config::XML_PATH_BASE_URL => self::BASE_URL,
+            ProviderSettings::XML_PATH_PROVIDER => $this->providerCode,
+            default => null,
+        });
+        $this->settings = new ProviderSettings($scopeConfig);
+
         $this->encoder = new RequestEncoder($config, new CanonicalJson());
         $this->circuitCache = new ArrayCache();
         $this->transport = new FakeTransport();
         $this->clock = new FakeClock();
+        $this->provider = new TypeSafeProvider($this->settings, new ResponseParser(), new Backoff(), $this->transport);
     }
 
-    private function client(): Client
+    private function client(?ProviderInterface $provider = null): Client
     {
         $cache = $this->createStub(ResponseCache::class);
         $cache->method('get')->willReturnCallback(fn (string $key) => $this->cached[$key] ?? null);
@@ -113,9 +138,11 @@ class ClientTest extends TestCase
         });
 
         $ledger = $this->createStub(UsageLedger::class);
-        $ledger->method('record')->willReturnCallback(function (...$args): void {
-            $this->ledgerRecords[] = $args;
-        });
+        $ledger->method('record')->willReturnCallback(
+            function (string $consumer, int $input, bool $hit, int $output = 0): void {
+                $this->ledgerRecords[] = [$consumer, $input, $hit, $output];
+            }
+        );
         $ledger->method('getRemainingBudget')->willReturnCallback(function (): ?int {
             if ($this->budgetFailure !== null) {
                 throw $this->budgetFailure;
@@ -131,10 +158,12 @@ class ClientTest extends TestCase
             });
         }
 
+        $provider ??= $this->provider;
+
         return new Client(
             $this->config,
             $this->encoder,
-            new ResponseParser($this->config),
+            new ProviderPool($this->settings, [$provider->getCode() => $provider]),
             $cache,
             $ledger,
             new CircuitBreaker($this->circuitCache, $logger),
@@ -165,9 +194,14 @@ class ClientTest extends TestCase
         return new HttpResponse(200, ['Content-Type' => 'application/json'], $this->okBody($tokens));
     }
 
+    private function key(Request $request, string $model): string
+    {
+        return $this->encoder->cacheKey($request, $model, $this->provider);
+    }
+
     private function cache(Request $request): void
     {
-        $this->cached[$this->encoder->cacheKey($request, $this->encoder->resolveModel($request))] = $this->okBody(77);
+        $this->cached[$this->key($request, $this->encoder->resolveModel($request))] = $this->okBody(77);
     }
 
     /**
@@ -219,6 +253,62 @@ class ClientTest extends TestCase
         $this->assertSame([], $this->transport->calls);
     }
 
+    public function testUnknownActiveProviderGivesNotConfiguredForEveryKey(): void
+    {
+        $this->providerCode = 'nope';
+
+        $results = $this->client()->evaluateMany(['a' => $this->request(), 'b' => $this->request('other')]);
+
+        foreach ($results as $result) {
+            $this->assertInstanceOf(NotConfiguredException::class, $result);
+            $this->assertSame('Unknown AI provider "nope".', $result->getMessage());
+        }
+        $this->assertNotSame($results['a'], $results['b']);
+        $this->assertSame([], $this->transport->calls);
+    }
+
+    public function testTypeSafeCacheKeyEqualsThePreProviderKey(): void
+    {
+        // sha256 of {"model":"jev-1.13.0","questions":{"q":{…}},"state":"A red cotton shirt"}, computed on 0.0.2.
+        $legacyKey = '1ca4a8153e5d155f74db3aa9aa03b707666af8256a170b029d403d4207d7e0fb';
+        $this->transport->queue = [$this->ok()];
+
+        $this->client()->evaluate($this->request());
+        $this->assertSame($legacyKey, $this->saved[0][0]);
+
+        $this->cached[$legacyKey] = $this->okBody(77);
+        $this->assertTrue($this->client()->evaluate($this->request())->isCached());
+        $this->assertWaveSizes([1]);
+    }
+
+    public function testProviderClassificationAndLabelAreUsed(): void
+    {
+        $provider = new class (
+            $this->settings,
+            new ResponseParser(),
+            new Backoff(),
+            $this->transport
+        ) extends TypeSafeProvider {
+            public function getLabel(): string
+            {
+                return 'Other AI';
+            }
+
+            public function classifyError(HttpResponse $response): ?TypeSafeException
+            {
+                return $response->getStatus() === 402
+                    ? new RequestException(__('Quota gone.'), null, 402)
+                    : null;
+            }
+        };
+        $this->transport->queue = [new HttpResponse(402, [], ''), new HttpResponse(401, [], '')];
+
+        $results = $this->client($provider)->evaluateMany([$this->request('a'), $this->request('b')]);
+
+        $this->assertSame('Quota gone.', $results[0]->getMessage());
+        $this->assertSame('Other AI rejected the API key (HTTP 401).', $results[1]->getMessage());
+    }
+
     public function testCacheHitSkipsHttpAndRecordsHit(): void
     {
         $request = $this->request();
@@ -229,14 +319,14 @@ class ClientTest extends TestCase
         $this->assertTrue($response->isCached());
         $this->assertSame(0, $response->getInputTokens());
         $this->assertSame([], $this->transport->calls);
-        $this->assertSame([['catalog_enrich', 0, true]], $this->ledgerRecords);
+        $this->assertSame([['catalog_enrich', 0, true, 0]], $this->ledgerRecords);
         $this->assertSame([], $this->saved);
     }
 
     public function testUnreadableCachedBodyIsAMiss(): void
     {
         $request = $this->request();
-        $this->cached[$this->encoder->cacheKey($request, 'jev-1.13.0')] = '{"broken"';
+        $this->cached[$this->key($request, 'jev-1.13.0')] = '{"broken"';
         $this->transport->queue = [$this->ok()];
 
         $response = $this->client()->evaluate($request);
@@ -244,7 +334,7 @@ class ClientTest extends TestCase
         $this->assertFalse($response->isCached());
         $this->assertWaveSizes([1]);
         $this->assertCount(1, $this->saved);
-        $this->assertSame([['catalog_enrich', 42, false]], $this->ledgerRecords);
+        $this->assertSame([['catalog_enrich', 42, false, 0]], $this->ledgerRecords);
     }
 
     public function testMissSendsOnceThenCachesAndRecordsTokens(): void
@@ -259,10 +349,10 @@ class ClientTest extends TestCase
         $this->assertSame(0.9, $response->getAnswer('q')->getProbability());
         $this->assertWaveSizes([1]);
         $this->assertSame(
-            [[$this->encoder->cacheKey($request, 'jev-1.13.0'), 'catalog_enrich', 'jev-1.13.0', $this->okBody(42), 42]],
+            [[$this->key($request, 'jev-1.13.0'), 'catalog_enrich', 'jev-1.13.0', $this->okBody(42), 42]],
             $this->saved
         );
-        $this->assertSame([['catalog_enrich', 42, false]], $this->ledgerRecords);
+        $this->assertSame([['catalog_enrich', 42, false, 0]], $this->ledgerRecords);
     }
 
     public function testExhaustedBudgetSendsNothingButServesCacheHits(): void
@@ -422,8 +512,8 @@ class ClientTest extends TestCase
 
         $body = json_decode((string)$this->transport->sent()[0]->getBody(), true);
         $this->assertSame('jev-1.14.0', $body['model']);
-        $this->assertSame($this->encoder->cacheKey($request, 'jev-1.14.0'), $this->saved[0][0]);
-        $this->assertNotSame($this->encoder->cacheKey($request, 'jev-1.13.0'), $this->saved[0][0]);
+        $this->assertSame($this->key($request, 'jev-1.14.0'), $this->saved[0][0]);
+        $this->assertNotSame($this->key($request, 'jev-1.13.0'), $this->saved[0][0]);
     }
 
     public function testHttpRequestShapeIsExact(): void
@@ -445,7 +535,11 @@ class ClientTest extends TestCase
             ],
             $sent->getHeaders()
         );
-        $this->assertSame($this->encoder->body($request, 'jev-1.13.0'), $sent->getBody());
+        $this->assertSame(
+            '{"model":"jev-1.13.0","state":"A red cotton shirt",'
+            . '"questions":{"q":{"type":"noul","instructions":"Is it red?"}}}',
+            $sent->getBody()
+        );
         $this->assertSame(20, $sent->getTimeout());
     }
 
@@ -469,7 +563,7 @@ class ClientTest extends TestCase
 
         $this->assertInstanceOf(TransportException::class, $result);
         $this->assertSame([], $this->saved);
-        $this->assertSame([['catalog_enrich', 90, false]], $this->ledgerRecords);
+        $this->assertSame([['catalog_enrich', 90, false, 0]], $this->ledgerRecords);
     }
 
     public function testFinalErrorMapping(): void
@@ -961,7 +1055,7 @@ class ClientTest extends TestCase
             $this->assertSame(0.9, $results[$key]->getAnswer('q')->getProbability());
         }
         $this->assertSame(
-            [['catalog_enrich', 42, false], ['catalog_enrich', 0, true], ['other_consumer', 0, true]],
+            [['catalog_enrich', 42, false, 0], ['catalog_enrich', 0, true, 0], ['other_consumer', 0, true, 0]],
             $this->ledgerRecords
         );
         $this->assertCount(1, $this->saved);
@@ -993,7 +1087,7 @@ class ClientTest extends TestCase
         $this->assertSame([], $this->transport->calls);
         $this->assertTrue($results[0]->isCached());
         $this->assertTrue($results[1]->isCached());
-        $this->assertSame([['catalog_enrich', 0, true], ['catalog_enrich', 0, true]], $this->ledgerRecords);
+        $this->assertSame([['catalog_enrich', 0, true, 0], ['catalog_enrich', 0, true, 0]], $this->ledgerRecords);
     }
 
     public function testErrorsFanOutToDuplicates(): void
@@ -1087,6 +1181,158 @@ class ClientTest extends TestCase
         $this->client()->evaluateMany([$this->request()]);
 
         $this->assertSame('3', $this->circuitCache->data[CircuitBreaker::FAILURES_KEY]);
+    }
+
+    private function llmClient(): Client
+    {
+        $this->providerCode = FakeLlmProvider::CODE;
+
+        return $this->client(new FakeLlmProvider($this->settings, $this->transport));
+    }
+
+    private function llmReply(?string $text = null, int $input = 50, int $output = 7): HttpResponse
+    {
+        return new HttpResponse(
+            200,
+            [],
+            FakeLlmProvider::reply($text ?? '{"q1":{"answer":true,"confidence":0.8}}', $input, $output)
+        );
+    }
+
+    /**
+     * User message of each sent request.
+     *
+     * @return string[]
+     */
+    private function sentUserMessages(): array
+    {
+        return array_map(
+            static fn ($request) => json_decode((string)$request->getBody(), true)['user'],
+            $this->transport->sent()
+        );
+    }
+
+    public function testInvalidAnswerIsResentOnceWithARepairNote(): void
+    {
+        $request = $this->request();
+        $this->transport->queue = [$this->llmReply('not json', 50, 7), $this->llmReply(null, 60, 9)];
+
+        $response = $this->llmClient()->evaluate($request);
+
+        $this->assertSame(0.8, $response->getAnswer('q')->getProbability());
+        $this->assertSame(60, $response->getInputTokens());
+        $this->assertWaveSizes([1, 1]);
+        [$first, $second] = $this->sentUserMessages();
+        $this->assertStringNotContainsString('previous reply was rejected', $first);
+        $this->assertStringStartsWith($first . "\n\n", $second);
+        $this->assertStringContainsString(
+            'Your previous reply was rejected: Invalid answer: the reply is not valid JSON.',
+            $second
+        );
+        $this->assertSame([], $this->clock->sleeps);
+        $this->assertCount(1, $this->saved);
+        $this->assertSame(
+            $this->encoder->cacheKey($request, 'jev-1.13.0', new FakeLlmProvider($this->settings, $this->transport)),
+            $this->saved[0][0]
+        );
+        $this->assertSame($this->llmReply(null, 60, 9)->getBody(), $this->saved[0][3]);
+        $this->assertSame(
+            [['catalog_enrich', 50, false, 7], ['catalog_enrich', 60, false, 9]],
+            $this->ledgerRecords
+        );
+    }
+
+    public function testInvalidAnswerTwiceIsFinal(): void
+    {
+        $this->transport->queue = [
+            $this->llmReply('not json'),
+            $this->llmReply('{"q1":{"answer":"yes","confidence":0.8}}'),
+            $this->llmReply(),
+        ];
+
+        $result = $this->llmClient()->evaluateMany([$this->request()])[0];
+
+        $this->assertInstanceOf(InvalidAnswerException::class, $result);
+        $this->assertStringStartsWith('Invalid answer: q1.', $result->getMessage());
+        $this->assertWaveSizes([1, 1]);
+        $this->assertCount(1, $this->transport->queue);
+        $this->assertSame([], $this->saved);
+        $this->assertSame(
+            [['catalog_enrich', 50, false, 7], ['catalog_enrich', 50, false, 7]],
+            $this->ledgerRecords
+        );
+    }
+
+    public function testInvalidAnswerIsRepairedEvenOnTheLastAttempt(): void
+    {
+        $this->maxAttempts = 1;
+        $this->transport->queue = [$this->llmReply('not json'), $this->llmReply()];
+
+        $this->assertInstanceOf(Response::class, $this->llmClient()->evaluate($this->request()));
+        $this->assertWaveSizes([1, 1]);
+    }
+
+    public function testInvalidAnswersDoNotCountTowardsTheCircuit(): void
+    {
+        $this->circuitCache->data[CircuitBreaker::FAILURES_KEY] = '4';
+        $this->transport->handler = fn () => $this->llmReply('not json');
+
+        $results = $this->llmClient()->evaluateMany([$this->request('a'), $this->request('b')]);
+
+        $this->assertContainsOnlyInstancesOf(InvalidAnswerException::class, $results);
+        $this->assertSame('4', $this->circuitCache->data[CircuitBreaker::FAILURES_KEY]);
+        $this->assertArrayNotHasKey(CircuitBreaker::OPEN_KEY, $this->circuitCache->data);
+    }
+
+    public function testInvalidAnswerDoesNotStopTheBatch(): void
+    {
+        $this->concurrency = 1;
+        $this->transport->handler = fn (HttpRequest $request) => str_contains(
+            (string)$request->getBody(),
+            'bad product'
+        ) ? $this->llmReply('[]') : $this->llmReply();
+
+        $results = $this->llmClient()->evaluateMany(
+            [$this->request('bad product'), $this->request('a'), $this->request('b')]
+        );
+
+        $this->assertInstanceOf(InvalidAnswerException::class, $results[0]);
+        $this->assertInstanceOf(Response::class, $results[1]);
+        $this->assertInstanceOf(Response::class, $results[2]);
+        $this->assertWaveSizes([1, 1, 1, 1]);
+    }
+
+    public function testRepairRoundAndRetryRoundShareOneSleep(): void
+    {
+        $this->transport->queue = [
+            $this->llmReply('not json'),
+            new HttpResponse(503),
+            $this->llmReply(),
+            $this->llmReply(),
+        ];
+
+        $results = $this->llmClient()->evaluateMany([$this->request('a'), $this->request('b')]);
+
+        $this->assertContainsOnlyInstancesOf(Response::class, $results);
+        $this->assertWaveSizes([2, 2]);
+        $this->assertCount(1, $this->clock->sleeps);
+    }
+
+    public function testRepairedRequestRetriedAfter5xxIsNotRepairedAgain(): void
+    {
+        $this->transport->queue = [
+            $this->llmReply('not json'),
+            new HttpResponse(503),
+            $this->llmReply('not json'),
+            $this->llmReply(),
+        ];
+
+        $result = $this->llmClient()->evaluateMany([$this->request()])[0];
+
+        $this->assertInstanceOf(InvalidAnswerException::class, $result);
+        $this->assertWaveSizes([1, 1, 1]);
+        $this->assertCount(1, $this->transport->queue);
+        $this->assertStringContainsString('previous reply was rejected', $this->sentUserMessages()[2]);
     }
 
     public function testDiPreferences(): void

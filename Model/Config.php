@@ -8,6 +8,10 @@ declare(strict_types=1);
 namespace DmLab\TypeSafeCore\Model;
 
 use DmLab\TypeSafeCore\Api\ConfigInterface;
+use DmLab\TypeSafeCore\Api\ProviderInterface;
+use DmLab\TypeSafeCore\Exception\NotConfiguredException;
+use DmLab\TypeSafeCore\Model\Provider\ProviderPool;
+use DmLab\TypeSafeCore\Model\Provider\ProviderSettings;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 
 /**
@@ -30,9 +34,13 @@ class Config implements ConfigInterface
 
     /**
      * @param ScopeConfigInterface $scopeConfig
+     * @param ProviderSettings $providerSettings
+     * @param ProviderPool $providerPool
      */
     public function __construct(
-        private readonly ScopeConfigInterface $scopeConfig
+        private readonly ScopeConfigInterface $scopeConfig,
+        private readonly ProviderSettings $providerSettings,
+        private readonly ProviderPool $providerPool
     ) {
     }
 
@@ -49,17 +57,27 @@ class Config implements ConfigInterface
      */
     public function isConfigured(): bool
     {
-        return $this->isEnabled() && $this->getApiKey() !== '';
+        return $this->isEnabled() && $this->getActiveProvider()?->isConfigured() === true;
     }
 
     /**
-     * Trimmed API key; '' when unset. Already decrypted by the config.xml backend model.
+     * Code of the selected AI provider, default 'typesafe'.
+     *
+     * @return string
+     */
+    public function getProvider(): string
+    {
+        return $this->providerSettings->getActiveCode();
+    }
+
+    /**
+     * TypeSafe API key, trimmed; '' when unset. Already decrypted by the config.xml backend model.
      *
      * @return string
      */
     public function getApiKey(): string
     {
-        return $this->getString(self::XML_PATH_API_KEY);
+        return $this->providerSettings->getApiKey(ProviderSettings::DEFAULT_PROVIDER);
     }
 
     /**
@@ -67,21 +85,18 @@ class Config implements ConfigInterface
      */
     public function getModel(): string
     {
-        $model = $this->getString(self::XML_PATH_MODEL);
-
-        return $model !== '' ? $model : self::DEFAULT_MODEL;
+        return $this->getActiveProvider()?->getModel()
+            ?? $this->providerSettings->getModel($this->getProvider());
     }
 
     /**
-     * API base URL without a trailing slash.
+     * TypeSafe API base URL without a trailing slash.
      *
      * @return string
      */
     public function getBaseUrl(): string
     {
-        $url = rtrim($this->getString(self::XML_PATH_BASE_URL), '/');
-
-        return $url !== '' ? $url : self::DEFAULT_BASE_URL;
+        return $this->providerSettings->getBaseUrl(ProviderSettings::DEFAULT_PROVIDER);
     }
 
     /**
@@ -91,7 +106,7 @@ class Config implements ConfigInterface
      */
     public function getTimeout(): int
     {
-        return $this->getClampedInt(self::XML_PATH_TIMEOUT, 20, 1, 120);
+        return $this->providerSettings->getTimeout();
     }
 
     /**
@@ -132,6 +147,20 @@ class Config implements ConfigInterface
     public function getCacheTtlDays(): int
     {
         return $this->getClampedInt(self::XML_PATH_CACHE_TTL_DAYS, 30, 0, PHP_INT_MAX);
+    }
+
+    /**
+     * Selected provider; null when its code is not registered.
+     *
+     * @return ProviderInterface|null
+     */
+    private function getActiveProvider(): ?ProviderInterface
+    {
+        try {
+            return $this->providerPool->getActive();
+        } catch (NotConfiguredException) {
+            return null;
+        }
     }
 
     /**

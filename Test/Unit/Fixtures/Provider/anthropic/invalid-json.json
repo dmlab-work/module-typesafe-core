@@ -1,0 +1,12 @@
+{
+    "id": "msg_01Bq7nYt2RwXc5vLpK9sJd3E",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-5-5-20261015",
+    "content": [
+        {"type": "text", "text": "{\"q1\":{\"answer\":false,\"confidence\":0.9},\"q2\":{\"choice\":\"wool\""}
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {"input_tokens": 400, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 21}
+}

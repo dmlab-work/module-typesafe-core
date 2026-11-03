@@ -69,14 +69,19 @@ class TestConnectionButtonTest extends TestCase
         return new TestConnectionButton($context, [], $this->createStub(SecureHtmlRenderer::class));
     }
 
-    private function invoke(TestConnectionButton $button, string $method): string
+    private function invoke(TestConnectionButton $button, string $method, mixed $fieldConfig = null): string
     {
-        return (new \ReflectionMethod($button, $method))->invoke($button, $this->createStub(AbstractElement::class));
+        $element = $this->createStub(AbstractElement::class);
+        $element->method('getData')->willReturnCallback(
+            static fn ($key = '') => $key === 'field_config' ? $fieldConfig : null
+        );
+
+        return (new \ReflectionMethod($button, $method))->invoke($button, $element);
     }
 
     public function testHtmlContainsEscapedUrlFormKeyAndMageInit(): void
     {
-        $html = $this->invoke($this->button(), '_getElementHtml');
+        $html = $this->invoke($this->button(), '_getElementHtml', ['path' => 'dmlab_typesafe/typesafe']);
 
         $this->assertSame([TestConnectionButton::TEST_ROUTE], $this->routes);
         $this->assertStringContainsString(
@@ -84,6 +89,7 @@ class TestConnectionButtonTest extends TestCase
             $html
         );
         $this->assertStringContainsString('data-form-key="fk&quot;123"', $html);
+        $this->assertStringContainsString('data-provider="typesafe"', $html);
         $this->assertStringContainsString(
             'data-mage-init="{&quot;DmLab_TypeSafeCore/js/test-connection&quot;: {}}"',
             $html
@@ -97,21 +103,53 @@ class TestConnectionButtonTest extends TestCase
         $this->assertStringNotContainsString(self::URL, $html);
     }
 
+    /**
+     * @return array<string, array{mixed, string}>
+     */
+    public static function fieldConfigProvider(): array
+    {
+        return [
+            'openai_compatible' => [['path' => 'dmlab_typesafe/openai_compatible'], 'openai_compatible'],
+            'gemini' => [['path' => 'dmlab_typesafe/gemini', 'id' => 'test_connection'], 'gemini'],
+            'escaped' => [['path' => 'dmlab_typesafe/a"b'], 'a&quot;b'],
+            'no path' => [['id' => 'test_connection'], ''],
+            'no config' => [null, ''],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('fieldConfigProvider')]
+    public function testDataProviderIsTheFieldsGroup(mixed $fieldConfig, string $expected): void
+    {
+        $html = $this->invoke($this->button(), '_getElementHtml', $fieldConfig);
+
+        $this->assertStringContainsString(' data-provider="' . $expected . '"', $html);
+    }
+
+    public function testScriptPostsTheProvider(): void
+    {
+        $js = (string)file_get_contents(dirname(__DIR__, 6) . '/view/adminhtml/web/js/test-connection.js');
+
+        $this->assertStringContainsString("body.append('provider', button.dataset.provider);", $js);
+    }
+
     public function testScopeLabelIsEmpty(): void
     {
         $this->assertSame('', $this->invoke($this->button(), '_renderScopeLabel'));
     }
 
-    public function testSystemXmlDeclaresButtonField(): void
+    public function testSystemXmlDeclaresButtonFieldPerProviderGroup(): void
     {
         $xml = simplexml_load_file(dirname(__DIR__, 6) . '/etc/adminhtml/system.xml');
-        $fields = $xml->xpath('//section[@id="dmlab_typesafe"]/group[@id="general"]/field[@id="test_connection"]');
+        $groups = [];
+        foreach ($xml->xpath('//section[@id="dmlab_typesafe"]/group[field[@id="test_connection"]]') as $group) {
+            $groups[] = (string)$group['id'];
+            $field = $group->xpath('field[@id="test_connection"]')[0];
+            $this->assertSame('button', (string)$field['type']);
+            $this->assertSame(TestConnectionButton::class, (string)$field->frontend_model);
+            $this->assertSame('Tests the saved configuration; save changes first.', (string)$field->comment);
+        }
 
-        $this->assertCount(1, $fields);
-        $field = $fields[0];
-        $this->assertSame('button', (string)$field['type']);
-        $this->assertSame(TestConnectionButton::class, (string)$field->frontend_model);
-        $this->assertSame('Tests the saved configuration; save changes first.', (string)$field->comment);
+        $this->assertSame(['typesafe', 'openai_compatible', 'anthropic', 'gemini'], $groups);
     }
 
     public function testAdminRouteIsDeclared(): void

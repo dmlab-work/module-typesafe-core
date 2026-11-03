@@ -23,6 +23,7 @@
             "requests": true,
             "cache_hits": true,
             "input_tokens": true,
+            "output_tokens": true,
             "updated_at": true
         },
         "constraint": {
